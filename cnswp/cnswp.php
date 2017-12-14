@@ -137,6 +137,7 @@ function get_user($db, $username, $password, $cnslimited){
 //Figure out what action to take
 function handle_url( $atts ){
     $out = "";
+
     $db = new mysqli(
         getenv("NNIN_HOSTNAME"),
         getenv("NNIN_USERNAME"),
@@ -159,12 +160,11 @@ function show_training_events($db){
     // as specified by the "eid" URL parameter
     $eid = 0;
     $davidsHack = "";
-
     // This gets the month and year from cns_workshops or URL params
     $mm = $db->query("SELECT distinct month(zdate) as mm, year(zdate) as yy FROM cns_workshops WHERE zdate >= '" . date("Y-m-d") . "' ORDER BY zdate ASC");
     $row_mm = $mm->fetch_assoc();
-    if (isset($_GET['m'])){
-        $selectedMonth = $db->real_escape_string($_GET['m']);
+    if (isset($_GET['mo'])){
+        $selectedMonth = $db->real_escape_string($_GET['mo']);
     } else {
         $selectedMonth = $row_mm['mm'];
     }
@@ -174,7 +174,6 @@ function show_training_events($db){
     } else {
         $selectedYear = $row_mm['yy'];
     }
-
     $view = "notall";
     if (isset($_GET['view']) && $_GET['view'] == "all"){
         $view = "all";
@@ -204,11 +203,10 @@ function show_training_events($db){
         if ($curTime == mktime(0,0,0,intval($selectedMonth),1,$selectedYear)){
             $selected = "selected";
         }
-        $opt = sprintf('<option %s value="%s">%s %s</option>', $selected, add_query_arg( array( 'm' => date("m",$curTime), 'y' => $row_mm['yy'])),  date("F",$curTime), date("Y", $curTime));
+        $opt = sprintf('<option %s value="%s">%s %s</option>', $selected, add_query_arg( array( 'mo' => date("m",$curTime), 'y' => $row_mm['yy'])),  date("F",$curTime), date("Y", $curTime));
         array_push($options, $opt);
     } while ($row_mm = mysqli_fetch_assoc($mm));
     $optstring = implode($options);
-
     
     // Go through each of the training sessions 
     $c=0;
@@ -335,7 +333,7 @@ function show_training_events($db){
     }
 
     $rowstr = implode($trs);
-
+    
     $out = <<<EOT
 <script language="JavaScript" type="text/JavaScript">
 function MM_jumpMenu(targ,selObj,restore){ //v3.0
