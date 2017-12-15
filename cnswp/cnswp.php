@@ -85,19 +85,22 @@ function get_user($db, $username, $password, $cnslimited){
         $stm = $db->prepare($query_rsL);
         $stm->bind_param('ss', $username, $password);
     }
-    $rsL = $stm->execute() or die($db->error);
+    $stm->execute() or die($db->error);
+    $rsL = $stm->get_result();
     $row_rsL = $rsL->fetch_assoc();
     $totalRows_rsL = $rsL->num_rows;
-
+   
     if ($totalRows_rsL > 0) {
         //Legit user, so get information
         # uid
-        array_push($userinfo, $row_rsL['usID']);
+        $uid = $row_rsL['usID'];
+        array_push($userinfo, $uid);
 
         $query_rs = "SELECT * FROM nnin_users WHERE id = ? AND active = 1";
         $stm = $db->prepare($query_rs);
-        $stm->bind_param('s',$userinfo['uid']);
-        $rs = $stm->execute() or die($db->error);
+        $stm->bind_param('s',$uid);
+        $stm->execute() or die($db->error);
+        $rs = $stm->get_result();
         $row_rs = $rs->fetch_assoc();
         $totalRows_rs = $rs->num_rows;
 
@@ -112,9 +115,9 @@ function get_user($db, $username, $password, $cnslimited){
                 $query_NF = "SELECT count(TT_ID) as conta FROM cns_trainlkp WHERE traineeid = ? AND (toolID=116 OR toolID=144)"; // check if user has NF-05 training
             }
             $stm = $db->prepare($query_NF);
-            $stm->bind_param('i',$userinfo['uid']);
-            $NF = $stm->execute() or die($db->error);
-
+            $stm->bind_param('i',$uid);
+            $stm->execute() or die($db->error);
+            $NF = $stm->get_result();
             $row_NF = $NF->fetch_assoc();
             $totalRows_NF = $NF->num_rows;
             if (intval($row_NF['conta']) > 0){
@@ -122,7 +125,6 @@ function get_user($db, $username, $password, $cnslimited){
             } else {
                 $eM = 3;
             }
-            mysql_free_result($NF);
         } else {
             $eM = 3; //Presumably not active
         }
@@ -130,25 +132,22 @@ function get_user($db, $username, $password, $cnslimited){
     } else {
         $eM = 4;
     } // end NNIN login check
-
+    mail('akitzmiller@g.harvard.edu','Login status', 'Status eM is ' . $eM);
     array_push($userinfo, $em);
     array_push($userinfo, $rOK);
     return $userinfo;
-
 }
 
 
 //Figure out what action to take
 function handle_url( $atts ){
     $out = "";
-
     $db = new mysqli(
         getenv("NNIN_HOSTNAME"),
         getenv("NNIN_USERNAME"),
         getenv("NNIN_PASSWORD"),
         getenv("NNIN_DATABASE")
     );
-
     if ((isset($_GET["ZID"]))) {
         $out = registration_form($db, array_merge($_GET, $_POST));
     }
@@ -409,7 +408,14 @@ function registration_form($db, $params){
             $cnslimited = intval($db->escape_string($params['CNSlimited']));
 
             if ($cnslimited > 0 && $username !== ""){
-                list($uid, $fullname, $email, $phone, $eM, $rOK) = get_user($db, $params['txtUsername'], $params['txtPassword'], $cnslimited);
+                $userinfo = get_user($db, $params['txtUsername'], $params['txtPassword'], $cnslimited);
+                if (count($userinfo) < 6){
+                    $errorMsg = "Failed login";
+                    $rOK = 0;
+                    $eM = 0;
+                } else {
+                    list($uid, $fullname, $email, $phone, $eM, $rOK) = get_user($db, $params['txtUsername'], $params['txtPassword'], $cnslimited);
+                }
             } elseif (isset($params['Full_Name']) && strlen($params['Full_Name']) < 33 && trim($params['Full_Name']) !== "" && trim($params['email']) !== "" && strlen($params['email']) < 33 && trim($params['Phone']) !== "" && strlen($params['Phone']) < 15) {
                 $fullname   = $db->escape_string(trim($params['Full_Name']));
                 $email      = $db->escape_string(trim($params['email']));
@@ -420,7 +426,7 @@ function registration_form($db, $params){
             } else {
                 header("Location: " . add_query_arg(array('ZID' => 'abcde')));
             }
-
+            
             //Retrieve documents for this zid
             $zid = $db->escape_string($params['ZID']);
             $stm = $db->prepare("SELECT zdocs from cns_workshops where z_id = ?");
