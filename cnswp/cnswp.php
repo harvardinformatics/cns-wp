@@ -103,7 +103,7 @@ function execSql($db, $sql, $typestr='', $vals=array()){
 //Username and password should be raw text
 function get_user($db, $username, $password, $cnslimited){
     $userinfo = [];
-    $rOk = 0;
+    $rOK = 0;
     $eM = 0;
 
     $password = crypto("encrypt", getenv("NNIN_CRYPTKEY"), $password);
@@ -141,7 +141,7 @@ function get_user($db, $username, $password, $cnslimited){
             array_push($userinfo, sprintf('%s %s', $row_rs['First_Name'], $row_rs['Last_Name']));
             array_push($userinfo, $row_rs['eMail']);  
             array_push($userinfo, $row_rs['Phone']);
- 
+
             if ($cnslimited == 1){
                 $query_NF = "SELECT count(TT_ID) as conta FROM cns_trainlkp WHERE traineeid = ? AND toolID=144"; // check if user has NF-05 training
             } elseif ($cnslimited == 2) {
@@ -166,7 +166,7 @@ function get_user($db, $username, $password, $cnslimited){
         $eM = 4;
     } // end NNIN login check
     mail('akitzmiller@g.harvard.edu','Login status', 'Status eM is ' . $eM);
-    array_push($userinfo, $em);
+    array_push($userinfo, $eM);
     array_push($userinfo, $rOK);
     return $userinfo;
 }
