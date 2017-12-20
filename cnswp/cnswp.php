@@ -12,19 +12,12 @@ Text Domain: cns
 Domain Path:       /languages
 */
 
-// If this file is called directly, abort.
-if ( ! defined( 'WPINC' ) ) {
-    die;
-}
 
 function activate_cns_wp() {
 }
 
 function deactivate_cns_wp() {
 }
-
-register_activation_hook( __FILE__, 'activate_cns_wp' );
-register_deactivation_hook( __FILE__, 'deactivate_cns_wp' );
 
 function get_base_url() {
     return plugins_url( '', __FILE__ );
@@ -57,14 +50,55 @@ function wdate($dstring){
     return $w;
 }
 
-// Executes a SQL statement using bound parameters returning the "result"
-// function execSql($db, $sql, $params){
-//    $stm = $db->prepare($sql) or die ("Failed to prepare the statement!");
-//    call_user_func_array(array($stm, 'bind_param'), refValues($params));
+function connect($hostname, $username, $password, $database){
+    $db = new mysqli( $hostname, $username, $password, $database);
+    return $db;
+}
+
+function refValues($arr){
+    if (strnatcmp(phpversion(),'5.3') >= 0) //Reference is required for PHP 5.3+
+    {
+        $refs = array();
+        foreach($arr as $key => $value)
+            $refs[$key] = &$arr[$key];
+        return $refs;
+    }
+    return $arr;
+}
+
+
+// Returns a single row as an associative array from the specified query
+// If $typestr and $vals are not specified, no param bind is done
+// $typestr should be the stm->bind_param type string (e.g. "ssi")
+// $vals should be an array of values to be bound to the statement
+function fetch_row_assoc($db, $sql, $typestr='', $vals=array()){
+    if (!is_array($vals)){
+        $vals = array($vals);
+    }
+    $resulth = execSql($db, $sql, $typestr, $vals);
+    return $resulth->fetch_assoc();
+}
+
+// Executes a SQL statement using bound parameters returning the statement result handle
+// If $typestr and $vals are not specified, no param bind is done
+// $typestr should be the stm->bind_param type string (e.g. "ssi")
+// $vals should be an array of values to be bound to the statement
+function execSql($db, $sql, $typestr='', $vals=array()){
+    $stm = $db->prepare($sql) or die ("Failed to prepare the SQL statement: " . $db->error);
+    if (!$typestr == ''){
+        if (!is_array($vals)){
+            $vals = array($vals);
+        }
+        array_unshift($vals, $typestr);
+        call_user_func_array(array($stm, 'bind_param'), refValues($vals));     
+    }
    
-//    $stm->execute();
-//    $result = $stm->get_result(); 
-// }
+    $stm->execute() or die("Unable to execute statement: " . $db->error);
+    $resulth = $stm->get_result() or die($db->error);
+    return $resulth;
+}
+
+
 //Login user and get user information
 //Username and password should be raw text
 function get_user($db, $username, $password, $cnslimited){
@@ -72,7 +106,6 @@ function get_user($db, $username, $password, $cnslimited){
     $rOk = 0;
     $eM = 0;
 
-    $username = $db->escape_string(trim($username));
     $password = crypto("encrypt", getenv("NNIN_CRYPTKEY"), $password);
 
     // check if user is NNIN registered
@@ -142,12 +175,7 @@ function get_user($db, $username, $password, $cnslimited){
 //Figure out what action to take
 function handle_url( $atts ){
     $out = "";
-    $db = new mysqli(
-        getenv("NNIN_HOSTNAME"),
-        getenv("NNIN_USERNAME"),
-        getenv("NNIN_PASSWORD"),
-        getenv("NNIN_DATABASE")
-    );
+    $db = connect(getenv("NNIN_HOSTNAME"), getenv("NNIN_USERNAME"), getenv("NNIN_PASSWORD"), getenv("NNIN_DATABASE"));
     if ((isset($_GET["ZID"]))) {
         $out = registration_form($db, array_merge($_GET, $_POST));
     }
@@ -325,12 +353,6 @@ function show_training_events($db){
     $rowstr = implode($trs);
     
     $out = <<<EOT
-<script language="JavaScript" type="text/JavaScript">
-function MM_jumpMenu(targ,selObj,restore){ //v3.0
-  eval(targ+".location='"+selObj.options[selObj.selectedIndex].value+"'");
-  if (restore) selObj.selectedIndex=0;
-}
-</script>    
 <table width="100%"  border="0" cellpadding="2" cellspacing="6" class="bodytxt">
     <tr>
         <td align="center"><strong>CNS Training Events - Registration Page</strong></td>
@@ -848,10 +870,16 @@ function registration_form($db, $params){
 
 }
 
-add_shortcode( 'training_events', 'handle_url' );
-add_action('wp_enqueue_scripts', 'add_scripts');
-function add_scripts() {
-    wp_register_style( 'cnswp', get_base_url() . '/cnswp.css' );
-    wp_enqueue_style( 'cnswp' );
-//    wp_enqueue_script( 'namespaceformyscript', 'http://locationofscript.com/myscript.js', array( 'jquery' ) );
+// Allows me to test outside of wordpress environment
+if (function_exists('add_shortcode')){
+    register_activation_hook( __FILE__, 'activate_cns_wp' );
+    register_deactivation_hook( __FILE__, 'deactivate_cns_wp' );
+
+    add_shortcode( 'training_events', 'handle_url' );
+    add_action('wp_enqueue_scripts', 'add_scripts');
+    function add_scripts() {
+        wp_register_style( 'cnswp', get_base_url() . '/cnswp.css' );
+        wp_enqueue_style( 'cnswp' );
+        wp_enqueue_script( 'cnswp', get_base_url() . '/cnswp.js', array( 'jquery' ) );
+    }
 }
