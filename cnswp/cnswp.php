@@ -193,7 +193,7 @@ function get_user($db, $username, $password){
 
 //Figure out what action to take
 function handle_url( $atts ){
-    $out = "";
+    $out = '';
     try {
         $db = connect(getenv("NNIN_HOSTNAME"), getenv("NNIN_USERNAME"), getenv("NNIN_PASSWORD"), getenv("NNIN_DATABASE"));
         if (!$db){
@@ -208,7 +208,7 @@ function handle_url( $atts ){
     } catch (Exception $e){
         $out = sprintf('<div class="error">%s</div>', $e->getMessage());
     }
-    return $out;
+    return '<script type="text/javascript">var cnswp=true;</script>' . $out;
 }
 
 
@@ -479,8 +479,6 @@ function registration_form($db, $params){
                     $userinfo['name']   = $db->escape_string(trim($params['Full_Name']));
                     $userinfo['email']  = $db->escape_string(trim($params['email']));
                     $userinfo['phone']  = $db->escape_string(trim($params['Phone']));
-                } else {
-                    header("Location: " . add_query_arg(array('ZID' => 'abcde')));
                 }
                 
                 $out = "";
@@ -488,37 +486,37 @@ function registration_form($db, $params){
                 // User failure messages
                 if ($cnslimited > 0) {
                     if ($params['txtUsername'] == "" || $params['txtPassword'] == ""){
-                        $errorMsg = "<strong>Both user name and password are required.</strong>";
+                        $errorMsg = 'Both user name and password are required.';
                     }
                     elseif (count($userinfo) == 0){
-                        $errorMsg = "<strong>Either your User Name or Password are incorrect.</strong><br><em>Please try again.</em><br>";
+                        $errorMsg = "Either your User Name or Password are incorrect.<br><em>Please try again.</em><br>";
                     }
                     elseif ($userinfo['active'] != 1){
-                        $errorMsg = "<strong>Your user account is no longer active.<br>Please call 617-496-9632 for support.</strong>";
+                        $errorMsg = "Your user account is no longer active.<br>Please call 617-496-9632 for support.";
                     }
                     elseif ($cnslimited == 2 && !array_key_exists('LISE Safety Training' , $userinfo['training'])){
-                        $errorMsg = "<strong>You are a valid CNS user but <u>NOT</u> a trained LISE cleanroom user.<br>
+                        $errorMsg = "You are a valid CNS user but <u>NOT</u> a trained LISE cleanroom user.<br>
                             You need formal Cleanroom training to attend this event.<br>
-                            Please call 617-496-9632 for further explanations.</strong><br>";
+                            Please call 617-496-9632 for further explanations.";
                     }
                     else {
                         // Already registered?
                         $result = fetch_row_assoc($db, 'SELECT count(atn_id) as c FROM cns_wksbooking WHERE zid = ? and uid = ?', 'ii', array($zid, $uid));
                         if ($result['c'] > 0){
-                            $errorMsg = '<strong>You were already registered for this event.<br />
+                            $errorMsg = 'You were already registered for this event.<br />
                                 No action was taken.<br />
-                                CNS <u>did NOT bill you again</u> for this registration.</strong>';
+                                CNS <u>did NOT bill you again</u> for this registration.';
                         }
                     }
                 } else {
-                    if ($userinfo['name'] == "" || $userinfo['email'] == "" || $userinfo['phone'] == ""){
-                        $errorMsg = '<strong>Please enter your full name, email, and phone.</strong>';
+                    if (!$userinfo['name'] || !$userinfo['email'] || !$userinfo['phone']){
+                        $errorMsg = 'Please enter your full name, email, and phone.';
                     } else {
                         // Already registered
                         $result = fetch_row_assoc($db, 'SELECT count(atn_id) as c FROM cns_wksbooking WHERE zid = ? and atemail = ?', 'is', array($zid, $userinfo['email']));
                         if ($result['c'] > 0){
-                            $errorMsg = '<strong>You were already registered for this event.<br />
-                                No action was taken.</strong>';
+                            $errorMsg = 'You were already registered for this event.<br />
+                                No action was taken.';
                         }
                     }
                 }
@@ -586,7 +584,7 @@ function registration_form($db, $params){
 
             // If there is an error, show the message and the form field values
             if ($errorMsg !== "") {
-                array_push($formrows, sprintf('<tr><td colspan="2">%s</td></tr>', $errorMsg));
+                array_push($formrows, sprintf('<tr><td class="cns-error" colspan="2">%s</td></tr>', $errorMsg));
             }
 
             // Add the hidden form fields
@@ -776,6 +774,6 @@ if (function_exists('add_shortcode')){
     function add_scripts() {
         wp_register_style( 'cnswp', get_base_url() . '/cnswp.css' );
         wp_enqueue_style( 'cnswp' );
-        wp_enqueue_script( 'cnswp', get_base_url() . '/cnswp.js', array( 'jquery' ) );
+        wp_enqueue_script( 'cnswp', get_base_url() . '/cnswp.js');
     }
 }

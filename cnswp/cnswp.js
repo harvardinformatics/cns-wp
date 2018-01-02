@@ -1,7 +1,9 @@
 document.addEventListener("DOMContentLoaded", function(event) {
-    var x = document.getElementsByClassName("hero");
-    for (i in x) {
-        x[i].style.display = "none";
+    if (typeof cnswp !== 'undefined'){
+        var x = document.getElementsByClassName("hero");
+        for (i in x) {
+            x[i].style.display = "none";
+        }
     }
 });
 

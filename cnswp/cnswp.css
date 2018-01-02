@@ -44,3 +44,8 @@ tr.training-date-row:nth-child(odd) {
 .available {
     color: green;
 }
+.cns-error {
+    font-weight: bold;
+    font-style: italic;
+    color: red;
+}
