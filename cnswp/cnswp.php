@@ -44,6 +44,47 @@ function make_links($text){
     return $ret;
 }
 
+// Composes and sends the signup message
+function send_signup_message($to, $name, $from='info@cns.fas.harvard.edu', $event, $signupid, $when, $documents){
+
+    $subject = sprintf("CNS Training: %s Confirmation Message", $event);
+
+    /* documents message */
+    $docmessage = "";
+    if (is_array($documents)){ // append links to documents
+        $docmessage .= "<br><br>Click the following link(s) to download the related training documentation:<br>";
+        foreach ($documents as $d){
+            $docmessage .= sprintf('&#8226; <a href="%s">%s</a><br>',$d,$d);
+        }
+    }
+
+    $cancelurl = sprintf('http://apps.cns.fas.harvard.edu/users/training_cancel.php?rid=%s&em=%s',$signupid, $to);
+    /* message */
+    $message = sprintf('Dear %s,<br><br>
+        We received your registration for the following CNS Training Event:<br>
+         <strong>%s on %s</strong><br><br>
+        To cancel this reservation <a href="%s">click here</a><br><br>
+        Thank you<br><br>The CNS Staff<br><br>
+        ________________________________________________<br>
+        This is an automatic CNS email confirmation.', $name, $event, $when, $cancelurl);
+    send_cns_mail($to, $from, $subject, $message);
+
+}
+
+// Send mail, including bcc to from address
+function send_cns_mail($to, $from, $subject, $message){
+    /* To send HTML mail, you can set the Content-type header. */
+    $headers  = "MIME-Version: 1.0\r\n";
+    $headers .= "Content-type: text/html; charset=iso-8859-1\r\n";
+    /* additional headers */
+    //$headers .= "To: <".$_POST['userEmail'].">\r\n";
+    $headers .= "From: CNS Staff <".$from.">\r\n";
+    //$headers .= "Cc: ".$_POST['from']."\r\n";
+    $headers .= "Bcc: ".$from."\r\n";
+    /* and now mail it */
+    mail($to, $subject, $message, $headers);
+}
+
 function wdate($dstring){
     $d = strtotime($dstring);
     $w = date('l, F jS, Y',$d);
@@ -55,6 +96,7 @@ function connect($hostname, $username, $password, $database){
     return $db;
 }
 
+// Used by execSql to get references for calling bind_param
 function refValues($arr){
     if (strnatcmp(phpversion(),'5.3') >= 0) //Reference is required for PHP 5.3+
     {
@@ -98,10 +140,16 @@ function execSql($db, $sql, $typestr='', $vals=array()){
     return $resulth;
 }
 
-
+// Return the number of slots available for the given training
+function get_taken_slots($db, $zid){
+    $row = fetch_row_assoc($db, "SELECT count(atn_id) as c FROM cns_wksbooking WHERE zid = ?", 'i', array($zid));
+    return $row['c'];
+}
 //Login user and get user information
 //Username and password should be raw text
-function get_user($db, $username, $password, $cnslimited){
+function get_user($db, $username, $password){
+    $u = [];
+
     $userinfo = [];
     $rOK = 0;
     $eM = 0;
@@ -109,78 +157,56 @@ function get_user($db, $username, $password, $cnslimited){
     $password = crypto("encrypt", getenv("NNIN_CRYPTKEY"), $password);
 
     // check if user is NNIN registered
+    $row_rsL = [];
     if (getenv("NNIN_DEBUG") != ""){
-        $query_rsL = 'SELECT * FROM nnin_login WHERE nnin_username = ?';
-        $stm = $db->prepare($query_rsL);
-        $stm->bind_param('s', $username);
+        $row_rsL = fetch_row_assoc($db, 'SELECT * FROM nnin_login WHERE nnin_username = ?', 's', array($username));
     } else {
-        $query_rsL = 'SELECT * FROM nnin_login WHERE nnin_username = ? AND nnin_pw = ?';
-        $stm = $db->prepare($query_rsL);
-        $stm->bind_param('ss', $username, $password);
+        $row_rsL = fetch_row_assoc($db, 'SELECT * FROM nnin_login WHERE nnin_username = ? AND nnin_pw = ?', 'ss', array($username, $password));
     }
-    $stm->execute() or die($db->error);
-    $rsL = $stm->get_result();
-    $row_rsL = $rsL->fetch_assoc();
-    $totalRows_rsL = $rsL->num_rows;
    
-    if ($totalRows_rsL > 0) {
+    if (count($row_rsL) > 0) {
         //Legit user, so get information
         # uid
         $uid = $row_rsL['usID'];
-        array_push($userinfo, $uid);
+        $u['uid']       = $uid;
+        $u['active']    = 0;
 
-        $query_rs = "SELECT * FROM nnin_users WHERE id = ? AND active = 1";
-        $stm = $db->prepare($query_rs);
-        $stm->bind_param('s',$uid);
-        $stm->execute() or die($db->error);
-        $rs = $stm->get_result();
-        $row_rs = $rs->fetch_assoc();
-        $totalRows_rs = $rs->num_rows;
+        $row_rs = fetch_row_assoc($db, "SELECT * FROM nnin_users WHERE id = ?", 's', array($uid));
 
-        if ($totalRows_rs > 0) { 
-            array_push($userinfo, sprintf('%s %s', $row_rs['First_Name'], $row_rs['Last_Name']));
-            array_push($userinfo, $row_rs['eMail']);  
-            array_push($userinfo, $row_rs['Phone']);
-
-            if ($cnslimited == 1){
-                $query_NF = "SELECT count(TT_ID) as conta FROM cns_trainlkp WHERE traineeid = ? AND toolID=144"; // check if user has NF-05 training
-            } elseif ($cnslimited == 2) {
-                $query_NF = "SELECT count(TT_ID) as conta FROM cns_trainlkp WHERE traineeid = ? AND (toolID=116 OR toolID=144)"; // check if user has NF-05 training
+        if (count($row_rs) > 0) { 
+            $u['name']      = sprintf('%s %s', $row_rs['First_Name'], $row_rs['Last_Name']);
+            $u['email']     = $row_rs['eMail'];
+            $u['phone']     = $row_rs['Phone'];
+            $u['active']    = $row_rs['active'];
+                
+            // check if user has general cns and or LISE cleanroom training
+            $NF = execSql($db, "SELECT t.tool_name FROM cns_tools t inner join cns_trainlkp tr on t.master_id = tr.toolid WHERE tr.traineeid = ? AND (toolid=116 OR toolid=144)", 'i', array($uid));
+            $u['training'] = [];
+            while ($row_NF = $NF->fetch_row()){
+                array_push($u['training'], $row_NF[0]);
             }
-            $stm = $db->prepare($query_NF);
-            $stm->bind_param('i',$uid);
-            $stm->execute() or die($db->error);
-            $NF = $stm->get_result();
-            $row_NF = $NF->fetch_assoc();
-            $totalRows_NF = $NF->num_rows;
-            if (intval($row_NF['conta']) > 0){
-                $rOK = 1;
-            } else {
-                $eM = 3;
-            }
-        } else {
-            $eM = 3; //Presumably not active
-        }
-        $rs->free();
-    } else {
-        $eM = 4;
-    } // end NNIN login check
-    mail('akitzmiller@g.harvard.edu','Login status', 'Status eM is ' . $eM);
-    array_push($userinfo, $eM);
-    array_push($userinfo, $rOK);
-    return $userinfo;
+        } 
+    } 
+    return $u;
 }
 
 
 //Figure out what action to take
 function handle_url( $atts ){
     $out = "";
-    $db = connect(getenv("NNIN_HOSTNAME"), getenv("NNIN_USERNAME"), getenv("NNIN_PASSWORD"), getenv("NNIN_DATABASE"));
-    if ((isset($_GET["ZID"]))) {
-        $out = registration_form($db, array_merge($_GET, $_POST));
-    }
-    else {
-        $out = show_training_events($db);
+    try {
+        $db = connect(getenv("NNIN_HOSTNAME"), getenv("NNIN_USERNAME"), getenv("NNIN_PASSWORD"), getenv("NNIN_DATABASE"));
+        if (!$db){
+            throw new Exception("Unable to connect to the CNS database: " . mysqli_connect_error());
+        }
+        if ((isset($_GET["ZID"]))) {
+            $out = registration_form($db, array_merge($_GET, $_POST));
+        }
+        else {
+            $out = show_training_events($db);
+        }
+    } catch (Exception $e){
+        $out = sprintf('<div class="error">%s</div>', $e->getMessage());
     }
     return $out;
 }
@@ -301,7 +327,7 @@ function show_training_events($db){
                         $row_lab['zlocation']
                     )
                 );
-		array_push($ntrs, sprintf('<tr><td colspan="5" class="training-trainer">Trainer: %s %s</td></tr>',$row_lab['First'],$row_lab['Last']));
+                array_push($ntrs, sprintf('<tr><td colspan="5" class="training-trainer">Trainer: %s %s</td></tr>',$row_lab['First'],$row_lab['Last']));
                 array_push($ntrs, sprintf('<tr><td colspan="5" class="training-desc">%s</td></tr>', $desc));
                 // Setup the header row
                 $userrestrictionheader = '<strong>Open Event!</strong>';
@@ -388,19 +414,13 @@ function registration_form($db, $params){
     $zid = $params['ZID'];
     $errorMsg = "";
 
-    $query_lab = "SELECT * FROM cns_workshops WHERE z_id = ?";
-    $stm = $db->prepare($query_lab);
-    $stm->bind_param('i',$zid);
-    $stm->execute() or die($db->error);
-    $lab = $stm->get_result();
-    $row_lab = $lab->fetch_assoc();
-    $totalRows_lab = $lab->num_rows;
-
+    $row_lab = fetch_row_assoc($db, "SELECT * FROM cns_workshops WHERE z_id = ?", 'i', array($zid));
+ 
     $out = "";
     $trs = [];
 
  
-    if ($totalRows_lab == 0){
+    if (count($row_lab) == 0){
         array_push($trs, '<tr><td><strong>This training event does NOT exist.</strong></td></tr>');
     } elseif (date("Y-m-d", strtotime($row_lab['start_time'])) < date("Y-m-d")){
         array_push($trs, '<tr><td><strong>This training event is in the past.</strong></td></tr>');
@@ -423,82 +443,91 @@ function registration_form($db, $params){
         );
         array_push($trs, $titlerow);
 
-
+        // Doing insert
         if (isset($params['MM_insert']) && $errorMsg == ""){
 
-            // Register the user
-            $cnslimited = intval($db->escape_string($params['CNSlimited']));
-
-            if ($cnslimited > 0 && $username !== ""){
-                $userinfo = get_user($db, $params['txtUsername'], $params['txtPassword'], $cnslimited);
-                if (count($userinfo) < 6){
-                    $errorMsg = "Failed login";
-                    $rOK = 0;
-                    $eM = 0;
-                } else {
-                    list($uid, $fullname, $email, $phone, $eM, $rOK) = get_user($db, $params['txtUsername'], $params['txtPassword'], $cnslimited);
-                }
-            } elseif (isset($params['Full_Name']) && strlen($params['Full_Name']) < 33 && trim($params['Full_Name']) !== "" && trim($params['email']) !== "" && strlen($params['email']) < 33 && trim($params['Phone']) !== "" && strlen($params['Phone']) < 15) {
-                $fullname   = $db->escape_string(trim($params['Full_Name']));
-                $email      = $db->escape_string(trim($params['email']));
-                $phone      = $db->escape_string(trim($params['Phone']));
-                $eM         = 0;
-                $rOK        = 0;
-                $uid        = 0;
-            } else {
-                header("Location: " . add_query_arg(array('ZID' => 'abcde')));
+            // If all the slots are taken...
+            $takenslots = get_taken_slots($db, $zid);
+            if ($takenslots >= $row_lab['zmax']){
+                $errorMsg = '<p><strong>The event you are trying <br/>
+                    to subscribe is full. <br />
+                    Please try another date.</strong></p>';
             }
-            
-            //Retrieve documents for this zid
-            $zid = $db->escape_string($params['ZID']);
-            $stm = $db->prepare("SELECT zdocs from cns_workshops where z_id = ?");
-            $stm->bind_param('i',$zid);
-            $stm->execute() or die($db->error);
-            $rsDocs = $stm->get_result();
-            $row_rsDocs = $rsDocs->fetch_assoc();
-            $totalRows_rsDocs = $rsDocs->num_rows;
+            else {
 
-            if (!empty($row_rsDocs['zdocs'])){
-                $documents = unserialize($row_rsDocs['zdocs']);
-            } else {
-                $documents="";
-            }
-
-            $out = "";
-
-            // Register the user
-            if ($rOK == 1 || $cnslimited == 0){
-
-                // Get the total number of bookings for this zid
-                $query_ch = "SELECT count(atn_id) as c FROM cns_wksbooking WHERE zid = ?";
-                $stm = $db->prepare($query_ch);
-                if (!$stm){
-                    return "That thing failed.--" . $db->error;
-                }
-                $stm->bind_param('i',$zid);
-                $stm->execute() or die($db->error);
-                $ch = $stm->get_result();
-                $row_ch = $ch->fetch_assoc();
-                $totalRows_ch = $ch->num_rows;
-
-                // See if the user is already registered
-                $query_ch2 = 'SELECT count(atn_id) FROM cns_wksbooking WHERE zid = ? and (uid = ? or atemail = ?)';
-                $stm = $db->prepare($query_ch2);
-                $stm->bind_param('iis',$zid, $uid, $email);
-                $stm->execute() or die($db->error);
-                $result = $stm->get_result();
-                $totalRows_ch2 = $result->fetch_row()[0];
-                if ($totalRows_ch2 == 0){
-                    $go = 1;
+                //Retrieve documents for this zid
+                $row_rsDocs = fetch_row_assoc($db, "SELECT zdocs from cns_workshops where z_id = ?", 'i', array($zid));
+                if (!empty($row_rsDocs['zdocs'])){
+                    $documents = unserialize($row_rsDocs['zdocs']);
                 } else {
-                    $go = 2;
+                    $documents="";
                 }
 
 
-                if ($row_ch['c'] < $params['zmax'] && $go == 1){
-                    $registration = "OK";
+                $cnslimited = $row_lab['CNSlimited'];
+
+                $userinfo = [];
+                $uid = 0;
+
+                // Fetch user information
+                if ($cnslimited > 0){
+                    $userinfo = get_user($db, $params['txtUsername'], $params['txtPassword']);
+                    if (count($userinfo) > 0){
+                        $uid = $userinfo['uid'];
+                    } 
+                } elseif (isset($params['Full_Name']) && strlen($params['Full_Name']) < 33 && trim($params['Full_Name']) !== "" && trim($params['email']) !== "" && strlen($params['email']) < 33 && trim($params['Phone']) !== "" && strlen($params['Phone']) < 15) {
+                    $userinfo['name']   = $db->escape_string(trim($params['Full_Name']));
+                    $userinfo['email']  = $db->escape_string(trim($params['email']));
+                    $userinfo['phone']  = $db->escape_string(trim($params['Phone']));
+                } else {
+                    header("Location: " . add_query_arg(array('ZID' => 'abcde')));
+                }
+                
+                $out = "";
+
+                // User failure messages
+                if ($cnslimited > 0) {
+                    if ($params['txtUsername'] == "" || $params['txtPassword'] == ""){
+                        $errorMsg = "<strong>Both user name and password are required.</strong>";
+                    }
+                    elseif (count($userinfo) == 0){
+                        $errorMsg = "<strong>Either your User Name or Password are incorrect.</strong><br><em>Please try again.</em><br>";
+                    }
+                    elseif ($userinfo['active'] != 1){
+                        $errorMsg = "<strong>Your user account is no longer active.<br>Please call 617-496-9632 for support.</strong>";
+                    }
+                    elseif ($cnslimited == 2 && !array_key_exists('LISE Safety Training' , $userinfo['training'])){
+                        $errorMsg = "<strong>You are a valid CNS user but <u>NOT</u> a trained LISE cleanroom user.<br>
+                            You need formal Cleanroom training to attend this event.<br>
+                            Please call 617-496-9632 for further explanations.</strong><br>";
+                    }
+                    else {
+                        // Already registered?
+                        $result = fetch_row_assoc($db, 'SELECT count(atn_id) as c FROM cns_wksbooking WHERE zid = ? and uid = ?', 'ii', array($zid, $uid));
+                        if ($result['c'] > 0){
+                            $errorMsg = '<strong>You were already registered for this event.<br />
+                                No action was taken.<br />
+                                CNS <u>did NOT bill you again</u> for this registration.</strong>';
+                        }
+                    }
+                } else {
+                    if ($userinfo['name'] == "" || $userinfo['email'] == "" || $userinfo['phone'] == ""){
+                        $errorMsg = '<strong>Please enter your full name, email, and phone.</strong>';
+                    } else {
+                        // Already registered
+                        $result = fetch_row_assoc($db, 'SELECT count(atn_id) as c FROM cns_wksbooking WHERE zid = ? and atemail = ?', 'is', array($zid, $userinfo['email']));
+                        if ($result['c'] > 0){
+                            $errorMsg = '<strong>You were already registered for this event.<br />
+                                No action was taken.</strong>';
+                        }
+                    }
+                }
+
+                // If no errors, register the user
+                if ($errorMsg == ""){
+
                     $stm = $db->prepare('INSERT INTO cns_wksbooking (atname, atemail, atphone, uid, zid) VALUES (?, ?, ?, ?, ?)');
-                    $stm->bind_param('sssii', $fullname, $email, $phone, $uid, $zid);
+                    $stm->bind_param('sssii', $userinfo['name'], $userinfo['email'], $userinfo['phone'], $uid, $zid);
                     $stm->execute() or die($db->error);
                     $newrid = $db->insert_id;
                         // mysql_select_db($database_NNIN, $NNIN);
@@ -514,166 +543,32 @@ function registration_form($db, $params){
                     // }
                     
                     // ---------- send eMail --------------------------------------------------
-                    /* recipients */
-                    $to  = $email;
-                    /* subject */
-                    $subject = sprintf("CNS Training: %s Confirmation Message",$params['event']);
-
-                    /* documents message */
-                    $docmessage = "";
-                    if (is_array($documents)){ // append links to documents
-                        $docmessage .= "<br><br>Click the following link(s) to download the related training documentation:<br>";
-                        foreach ($documents as $d){
-                            $docmessage .= sprintf('&#8226; <a href="%s">%s</a><br>',$d,$d);
-                        }
-                    }
-                    $cancelurl = sprintf('http://apps.cns.fas.harvard.edu/users/training_cancel.php?rid=%s&em=%s',$newrid, $email);
-                    /* message */
-                    $message = sprintf('Dear %s,<br><br>We received your registration for the following CNS Training Event:<br> <strong>%s on %s</strong><br><br>To cancel this reservation <a href="%s">click here</a><br><br>Thank you<br><br>The CNS Staff<br><br>________________________________________________<br>This is an automatic CNS email confirmation.', $fullname, $params['event'], $params['when'], $cancelurl);
-
-                    
-                    /* To send HTML mail, you can set the Content-type header. */
-                    $headers  = "MIME-Version: 1.0\r\n";
-                    $headers .= "Content-type: text/html; charset=iso-8859-1\r\n";
-                    /* additional headers */
-                    //$headers .= "To: <".$_POST['userEmail'].">\r\n";
-                    $headers .= "From: CNS Staff <".$emailaddress.">\r\n";
-                    //$headers .= "Cc: ".$_POST['from']."\r\n";
-                    $headers .= "Bcc: ".$emailaddress."\r\n";
-                    /* and now mail it */
-                    mail($to, $subject, $message, $headers);
+                    send_signup_message($userinfo['email'], $userinfo['name'], $row_lab['contactEmail'], $params['event'], $newrid, $params['when'], $documents);
+                    array_push($trs,
+                        sprintf(
+                            '
+                            <tr>
+                                <td valign="top">
+                                    <table width="100%%" height="150" border="0" cellpadding="0" cellspacing="0">
+                                        <tr>
+                                            <td align="center" valign="middle">
+                                                <p><strong>Thank you!</strong></p>
+                                                <p><strong> A confirmation message<br />
+                                                    has been sent to<br />
+                                                    %s</strong>
+                                                </p>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                            ', 
+                            $userinfo['email']) 
+                    );
                         
-                } else {
-                    if ($go == 0){
-                        $registration = "already registered";
-                    } elseif ($go == 2){
-                        $registration = "already registered free";
-                    } else {
-                        $registration = "full";
-                    }
-                }
-            } else {
-                if ($eM == 1){
-                    $errorMsg = "<strong>Your user account is no longer active.<br>Please call 617-496-9632 for support.</strong>";
-                }
-                if ($eM == 2){
-                    $errorMsg = "<strong>You are NOT a trained LISE cleanroom user.<br>Please call 617-496-9632 for further explanations.</strong><br>";
-                }
-                if ($eM == 3){
-                    $errorMsg = "<strong>You are a valid CNS user but <u>NOT</u> a trained LISE cleanroom user.<br>You need formal Cleanroom training to attend this event.<br>Please call 617-496-9632 for further explanations.</strong><br>";
-                }
-                if ($eM == 4){
-                    $errorMsg = "<strong>Either your User Name or Password are incorrect.</strong><br><em>Please try again.</em><br>";
-                }
-            } // End of register the user
-
-            if ($registration == "OK"){ 
-                array_push($trs,
-                    sprintf(
-                        '
-                        <tr>
-                            <td valign="top">
-                                <table width="100%" height="150" border="0" cellpadding="0" cellspacing="0">
-                                    <tr>
-                                        <td align="center" valign="middle">
-                                            <p><strong>Thank you!</strong></p>
-                                            <p><strong> A confirmation message<br />
-                                                has been sent to<br />
-                                                %s</strong>
-                                            </p>
-                                        </td>
-                                    </tr>
-                                </table>
-                            </td>
-                        </tr>
-                        ', 
-                        $email) 
-                );
+                }  
             }
-            if ($registration == "full"){
-                array_push($trs,
-                    '
-                    <tr>
-                        <td valign="top">
-                            <table width="100%" height="150" border="0" cellpadding="0" cellspacing="0">
-                                <tr>
-                                    <td align="center" valign="middle"><p>&nbsp;</p>
-                                        <table width="90%" border="0" cellpadding="5" cellspacing="0" class="bodytxt">
-                                            <tr>
-                                                <td align="center">
-                                                    <p><strong>The event you are trying <br />
-                                                        to subscribe is full. <br />
-                                                        Please try another date.</strong>
-                                                    </p>
-                                                </td>
-                                            </tr>
-                                        </table>
-                                        <p>&nbsp;</p>
-                                        <p>[<a href="javascript:window.close();">close this window</a>]</p>
-                                    </td>
-                                </tr>
-                            </table>
-                        </td>
-                    </tr>
-                    '
-                );
-            }
-            if ($registration == "already registered"){
-                array_push($trs, 
-                    '
-                    <tr>
-                        <td valign="top">
-                            <table width="100%" height="150" border="0" cellpadding="0" cellspacing="0">
-                                <tr>
-                                    <td align="center" valign="middle">
-                                        <p>&nbsp;</p>
-                                        <table width="90%" border="0" cellpadding="5" cellspacing="0" class="bodytxt">
-                                            <tr>
-                                                <td align="center"><strong>You were already registered for this event.<br />
-                                                    No action was taken.<br />
-                                                    CNS <u>did NOT bill you again</u> for this registration.</strong>
-                                                </td>
-                                            </tr>
-                                        </table>
-                                        <p>&nbsp;</p>
-                                        <p>[<a href="javascript:window.close();">close this window</a>]</p>
-                                    </td>
-                                </tr>
-                            </table>
-                        </td>
-                    </tr>
-                    '
-                );
-            }
-            if ($registration == "already registered free"){ 
-                array_push($trs, 
-                    '
-                     <tr>
-                        <td valign="top">
-                            <table width="100%" height="150" border="0" cellpadding="0" cellspacing="0">
-                                <tr>
-                                    <td align="center" valign="middle">
-                                        <p>&nbsp;</p>
-                                        <table width="90%" border="0" cellpadding="5" cellspacing="0" class="bodytxt">
-                                            <tr>
-                                                <td align="center"><strong>You were already registered for this event.<br />
-                                                    No action was taken.</strong>
-                                                </td>
-                                            </tr>
-                                        </table>
-                                        <p>&nbsp;</p>
-                                        <p>[<a href="javascript:window.close();">close this window</a>]</p>
-                                    </td>
-                                </tr>
-                            </table>
-                        </td>
-                    </tr>
-                    '
-                );
-            }
-
         } // End doing registration insert
-
 
         if (!(isset($params['MM_insert'])) or $errorMsg != "") { 
 
@@ -688,6 +583,7 @@ function registration_form($db, $params){
 
 
             $formrows = [];
+
             // If there is an error, show the message and the form field values
             if ($errorMsg !== "") {
                 array_push($formrows, sprintf('<tr><td colspan="2">%s</td></tr>', $errorMsg));
