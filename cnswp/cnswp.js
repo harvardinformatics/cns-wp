@@ -1,8 +1,11 @@
 document.addEventListener("DOMContentLoaded", function(event) {
     if (typeof cnswp !== 'undefined'){
-        var x = document.getElementsByClassName("hero");
-        for (i in x) {
-            x[i].style.display = "none";
+        var skips = ['hero','button-group', 'pagination'];
+        for (var i = 0; i < skips.length; i++){
+            var x = document.getElementsByClassName(skips[i]);
+            for (var j = 0; j < x.length;  j++) {
+                x[j].style.display = "none";
+            }
         }
     }
 });

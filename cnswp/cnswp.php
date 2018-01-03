@@ -23,6 +23,27 @@ function get_base_url() {
     return plugins_url( '', __FILE__ );
 }
 
+//Figure out what action to take
+function handle_url( $atts ){
+    $out = '';
+    try {
+        $db = connect(getenv("NNIN_HOSTNAME"), getenv("NNIN_USERNAME"), getenv("NNIN_PASSWORD"), getenv("NNIN_DATABASE"));
+        if (!$db){
+            throw new Exception("Unable to connect to the CNS database: " . mysqli_connect_error());
+        }
+        if ((isset($_GET["ZID"]))) {
+            $out = registration_form($db, array_merge($_GET, $_POST));
+        }
+        else {
+            $out = show_training_events($db);
+        }
+    } catch (Exception $e){
+        $out = sprintf('<div class="error">%s</div>', $e->getMessage());
+    }
+    $preamble = '<script type="text/javascript">var cnswp=true;</script>';
+    return $preamble . $out;
+}
+
 //Encode the password
 function crypto($dowhat,$key,$string){
     if ($dowhat == "encrypt"){
@@ -145,6 +166,7 @@ function get_taken_slots($db, $zid){
     $row = fetch_row_assoc($db, "SELECT count(atn_id) as c FROM cns_wksbooking WHERE zid = ?", 'i', array($zid));
     return $row['c'];
 }
+
 //Login user and get user information
 //Username and password should be raw text
 function get_user($db, $username, $password){
@@ -190,26 +212,6 @@ function get_user($db, $username, $password){
     return $u;
 }
 
-
-//Figure out what action to take
-function handle_url( $atts ){
-    $out = '';
-    try {
-        $db = connect(getenv("NNIN_HOSTNAME"), getenv("NNIN_USERNAME"), getenv("NNIN_PASSWORD"), getenv("NNIN_DATABASE"));
-        if (!$db){
-            throw new Exception("Unable to connect to the CNS database: " . mysqli_connect_error());
-        }
-        if ((isset($_GET["ZID"]))) {
-            $out = registration_form($db, array_merge($_GET, $_POST));
-        }
-        else {
-            $out = show_training_events($db);
-        }
-    } catch (Exception $e){
-        $out = sprintf('<div class="error">%s</div>', $e->getMessage());
-    }
-    return '<script type="text/javascript">var cnswp=true;</script>' . $out;
-}
 
 
 
@@ -355,7 +357,7 @@ function show_training_events($db){
                 $regtd = '<strong>Registration Closed</strong>';
 
                 if ($available > 0){
-                    $reglink = add_query_arg(array( 'ZID' => $row_lab['Z_ID'], 'cEmail' => $row_lab['contactEmail'], 'limited' => $row_lab['CNSlimited'], 'bill' => $billThis, 'toTID' => $toTID));
+                    $reglink = add_query_arg(array( 'ZID' => $row_lab['Z_ID'], 'toTID' => $toTID));
                     $regtd = sprintf('<a href="%s">%sRegister!</a>', $reglink, $pre);
                 }
                 $tds = [
@@ -387,7 +389,7 @@ function show_training_events($db){
         <td valign="top">&nbsp;</td>
     </tr>
     <tr>
-        <td valign="top"><p>Registration is currently open for the following training sessions:</p></td>
+        <td valign="top"><h2>Registration is currently open for the following training sessions:</h2></td>
     </tr>
     <form name="form" id="form">
         <tr>
@@ -436,7 +438,12 @@ function registration_form($db, $params){
             $starttime = $row_lab['ztime'];
         }
         $titlerow = sprintf(
-            '<tr><td align="center" valign="top"><strong>%s Sign-Up</strong><br/><em>on %s @ %s</em></td></tr>',
+            '<tr>
+                <td align="center">
+                    <span class="training-title">%s Sign-Up</span><br/>
+                    <span class="training-subtitle">%s @ %s</span>
+                </td>
+            </tr>',
             $row_lab['zname'],
             wdate($row_lab['zdate']),
             $starttime
@@ -546,19 +553,10 @@ function registration_form($db, $params){
                         sprintf(
                             '
                             <tr>
-                                <td valign="top">
-                                    <table width="100%%" height="150" border="0" cellpadding="0" cellspacing="0">
-                                        <tr>
-                                            <td align="center" valign="middle">
-                                                <p><strong>Thank you!</strong></p>
-                                                <p><strong> A confirmation message<br />
-                                                    has been sent to<br />
-                                                    %s</strong>
-                                                </p>
-                                            </td>
-                                        </tr>
-                                    </table>
-                                </td>
+                                <td valign="top" class="training-note">
+                                    Thank you!<br/>
+                                    A confirmation message has been sent to %s.
+                               </td>
                             </tr>
                             ', 
                             $userinfo['email']) 
@@ -592,13 +590,13 @@ function registration_form($db, $params){
             array_push($formrows, sprintf('<input type="hidden" name="billThis" value="%s"/>', $bill));
             array_push($formrows, sprintf('<input type="hidden" name="bill_tool" value="%s"/>', $totid));
             array_push($formrows, sprintf('<input type="hidden" name="event" value="%s"/>', $row_lab['zname']));
-            array_push($formrows, sprintf('<input type="hidden" name="zmax" value="%s"/>', $row_lab['zmax']));
+//            array_push($formrows, sprintf('<input type="hidden" name="zmax" value="%s"/>', $row_lab['zmax']));
             array_push($formrows, sprintf('<input type="hidden" name="zdate" value="%s"/>', $row_lab['zdate']));
             array_push($formrows, sprintf('<input type="hidden" name="zStart" value="%s"/>', $row_lab['start_time']));
             array_push($formrows, sprintf('<input type="hidden" name="zStop" value="%s"/>', $row_lab['end_time']));
             array_push($formrows, sprintf('<input type="hidden" name="when" value="%s @ %s"/>', wdate($row_lab['zdate']), $starttime));
             array_push($formrows, sprintf('<input type="hidden" name="desc" value="%s"/>', $row_lab['zdesc']));
-            array_push($formrows, sprintf('<input type="hidden" name="CNSlimited" value="%s"/>',$row_lab['CNSlimited']));
+//            array_push($formrows, sprintf('<input type="hidden" name="CNSlimited" value="%s"/>',$row_lab['CNSlimited']));
 
 
             if ($row_lab['CNSlimited'] > 0){
@@ -623,13 +621,8 @@ function registration_form($db, $params){
                     array_push(
                         $formrows, 
                         '<tr>
-                            <td colspan="2">
-                                <table width="100%" border="0" cellspacing="0" cellpadding="3">
-                                    <tr>
-                                        <td valign="top"><strong>Please Note:</strong> according to your CNS user status, you will be charged a fee for this training session. See fee prospectus below:
-                                        </td>
-                                    </tr>
-                                </table>
+                            <td colspan="2" class="training-note">
+                                <strong>Please Note:</strong> according to your CNS user status, you will be charged a fee for this training session. See fee prospectus below:
                             </td>
                         </tr>'
                     );
@@ -639,12 +632,22 @@ function registration_form($db, $params){
                         $feerows,
                         sprintf(
                             '<tr>
-                                <td width="30%%" height="25" align="right"><strong>Academic** </strong></td>
-                                <td width="20%%" height="25">$%01.2f</td>
-                                <td width="30%%" height="25" align="right"><strong>ClubNano</strong></td>
-                                <td width="20%%" height="25">$%01.2f</td>
+                                <th align="right">
+                                    Academic with Harvard billing code<br/>
+                                    <span class="small-note">(w/out billing code, add 30%%)</span>
+                                </th>
+                                <td width="20%%">$%01.2f</td>
                             </tr>', 
-                            $feesAr[0],
+                            $feesAr[0]
+                        )
+                    );
+                    array_push(
+                        $feerows,
+                        sprintf(
+                            '<tr>
+                                <th align="right">ClubNano</th>
+                                <td>$%01.2f</td>
+                            </tr>',
                             $feesAr[2]
                         )
                     );
@@ -652,18 +655,16 @@ function registration_form($db, $params){
                         $feerows,
                         sprintf(
                             '<tr>
-                                <td height="25" colspan="2" valign="top"><strong>**</strong> If you are not paying with a Harvard billing code, an extra 30%% overhead will be charged</td>
-                                <td width="30%%" height="25" align="right"><strong>Standard Non Academic</strong></td>
+                                <th align="right">Standard Non Academic</th>
                                 <td width="20%%" height="25">$%01.2f</td>
-                            </tr>',
+                             </tr>',
                             $feesAr[3]
                         )
                     );
-
                     $feesrow = sprintf(
                         '<tr>
-                            <td colspan="2">
-                                <table width="100%%" border="0" cellpadding="2" cellspacing="1">
+                            <td colspan="2" style="border-top: 1px solid grey; border-bottom: 1px solid grey">
+                                <table class="fee-table">
                                     %s
                                 </table>
                             </td>
@@ -677,26 +678,27 @@ function registration_form($db, $params){
                 // Add login rows
                 array_push($formrows,
                     '<tr>
-                        <td colspan="2" align="center">Please sign up using your CNS user login credentials:</td>
+                        <td colspan="2" align="center" class="training-note">Please sign up using your CNS user login credentials:</td>
                     </tr>'
                 );
                 array_push($formrows,
                     '<tr>
                         <td colspan="2" align="center">
-                            <table width="250" border="0" cellspacing="0" cellpadding="0">
+                            <table>
                                 <tr>
                                     <td>
-                                        <table width="250" border="0" cellpadding="2" cellspacing="1">
+                                        <table class="fee-table">
                                             <tr>
-                                                <td width="80"><strong>User Name*</strong></td>
-                                                <td><input name="txtUsername" type="text" class="form3" id="txtUsername" size="20" /></td>
+                                                <th>User Name*</th>
+                                                <td width="50%"><input name="txtUsername" type="text" class="form3" id="txtUsername" size="20" /></td>
                                             </tr>
                                             <tr>
-                                                <td width="80"><strong>Password*</strong></td>
+                                                <th>Password*</th>
                                                 <td><input name="txtPassword" type="password" class="form3" id="txtPassword" size="10" /></td>
                                             </tr>
                                             <tr>
-                                                <td colspan="2">* <em>required</em></td>
+                                                <td>&nbsp;</td>
+                                                <td class="small-note">* required</td>
                                             </tr>
                                         </table>
                                     </td>
@@ -744,12 +746,15 @@ function registration_form($db, $params){
                 </tr> 
                 <tr>
                     <input type="hidden" name="MM_insert" value="reg" />
-                    <td colspan="2" align="center"><input type="submit" class="button2" value="sign-up" /></td>
+                    <td align="center"><p class="login-btn login-item"><input type="submit" value="Sign up" /></p></td>
+                    <td>&nbsp;</td>
                 </tr>
                 '
             );
             $formstr = sprintf(
-                '<form id="reg" method="POST" action="" name="reg" onsubmit="return document.MM_returnValue"><table width="100%%" border="0" cellpadding="0" cellspacing="4">%s</table></form>',
+                '<form id="reg" method="POST" action="" name="reg" onsubmit="return document.MM_returnValue">
+                    <table class="form-table">%s</table>
+                </form>',
                 implode($formrows)
             );
             array_push($trs, sprintf('<tr><td valign="top">%s</td></tr>', $formstr));
@@ -757,9 +762,8 @@ function registration_form($db, $params){
         }
 
 
-    $out = sprintf('<table width="350" border="0" align="center" cellpadding="0" cellspacing="5" class="bodytxt">%s</table>', implode($trs));
-    return $out;        
-
+    $out = sprintf('<div id="class-list-link"><a href="%s">Back to training</a></div><table class="signup-table">%s</table>', get_permalink($post->ID), implode($trs));
+    return $out; 
     } // Training OK
 
 }

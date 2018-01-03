@@ -23,6 +23,14 @@ tr.training-date-row:nth-child(odd) {
     color: #b21d2e;
     font-size: 1.2em;
 }
+.training-subtitle {
+    font-style: italic;
+}
+.training-note {
+    color: #b21d2e;
+    font-style: italic; 
+    text-align: center;   
+}
 .training-trainer {
     font-weight: 900;
     color: #b21d2e;
@@ -48,4 +56,34 @@ tr.training-date-row:nth-child(odd) {
     font-weight: bold;
     font-style: italic;
     color: red;
+    text-align: center;
 }
+.fee-table {
+    border-spacing: 10px;
+    border-collapse: separate;
+    width: 100%;
+}
+.signup-table {
+    width: 70%;
+    border: none;
+    border-collapse: separate;
+    border-spacing: 20px;
+    margin: 4em;
+}
+.small-note {
+    font-weight: normal;
+    font-style: italic;
+    font-size: 0.8em;
+}
+.form-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 10px;
+}
+#class-list-link {
+    width: 100%;
+    text-align: right;
+    font-style: italic;
+}
+
+
