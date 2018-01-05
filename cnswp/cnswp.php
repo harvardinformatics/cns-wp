@@ -31,8 +31,13 @@ function handle_url( $atts ){
         if (!$db){
             throw new Exception("Unable to connect to the CNS database: " . mysqli_connect_error());
         }
-        if ((isset($_GET["ZID"]))) {
-            $out = registration_form($db, array_merge($_GET, $_POST));
+        $params = array_merge($_GET, $_POST);
+
+        if (isset($_GET["ZID"])) {
+            $out = registration_form($db, $params);
+        }
+        elseif (array_key_exists('rid', $params)) {
+            $out = training_cancel($db, $params);
         }
         else {
             $out = show_training_events($db);
@@ -79,7 +84,7 @@ function send_signup_message($to, $name, $from='info@cns.fas.harvard.edu', $even
         }
     }
 
-    $cancelurl = sprintf('http://apps.cns.fas.harvard.edu/users/training_cancel.php?rid=%s&em=%s',$signupid, $to);
+    $cancelurl = sprintf('%s?rid=%s&em=%s',get_permalink($post->ID),$signupid, $to);
     /* message */
     $message = sprintf('Dear %s,<br><br>
         We received your registration for the following CNS Training Event:<br>
@@ -90,6 +95,32 @@ function send_signup_message($to, $name, $from='info@cns.fas.harvard.edu', $even
         This is an automatic CNS email confirmation.', $name, $event, $when, $cancelurl);
     send_cns_mail($to, $from, $subject, $message);
 
+}
+
+// Send cancellation email
+function send_cancellation_email($to, $from, $name, $event, $eventdate, $invid){
+
+    $invoicenotice = "";
+    if ($invid > 0){
+        $invoicenotice = "You will NOT be charged for this canceled training event.";        
+    }
+
+    $subject = sprintf("CNS Training: %s Your Reservation Has Been Deleted", $event);
+    $message = sprintf(
+        "Dear %s, <br/><br/>
+        Your reservation for the %s CNS Training Event on %s has been deleted.<br/>
+        %s<br/>
+        Thank you,<br/><br/>
+        The CNS Staff.<br/><br/>
+        ________________________________________________<br>
+        This is an automatic CNS email confirmation.
+        ",
+        $name,
+        $event,
+        $eventdate,
+        $invoicenotice
+    );
+    send_cns_mail($to, $from, $subject, $message);
 }
 
 // Send mail, including bcc to from address
@@ -117,8 +148,8 @@ function connect($hostname, $username, $password, $database){
     return $db;
 }
 
-// Used by execSql to get references for calling bind_param
-function refValues($arr){
+// Used by exec_sql to get references for calling bind_param
+function ref_values($arr){
     if (strnatcmp(phpversion(),'5.3') >= 0) //Reference is required for PHP 5.3+
     {
         $refs = array();
@@ -138,7 +169,7 @@ function fetch_row_assoc($db, $sql, $typestr='', $vals=array()){
     if (!is_array($vals)){
         $vals = array($vals);
     }
-    $resulth = execSql($db, $sql, $typestr, $vals);
+    $resulth = exec_sql($db, $sql, $typestr, $vals);
     return $resulth->fetch_assoc();
 }
 
@@ -146,18 +177,23 @@ function fetch_row_assoc($db, $sql, $typestr='', $vals=array()){
 // If $typestr and $vals are not specified, no param bind is done
 // $typestr should be the stm->bind_param type string (e.g. "ssi")
 // $vals should be an array of values to be bound to the statement
-function execSql($db, $sql, $typestr='', $vals=array()){
-    $stm = $db->prepare($sql) or die ("Failed to prepare the SQL statement: " . $db->error);
+function exec_sql($db, $sql, $typestr='', $vals=array()){
+    $stm = $db->prepare($sql);
+    if (!$stm){
+        throw new Exception("Failed to prepare the SQL statement: " . $db->error);
+    } 
     if (!$typestr == ''){
         if (!is_array($vals)){
             $vals = array($vals);
         }
         array_unshift($vals, $typestr);
-        call_user_func_array(array($stm, 'bind_param'), refValues($vals));     
+        call_user_func_array(array($stm, 'bind_param'), ref_values($vals));     
     }
    
-    $stm->execute() or die("Unable to execute statement: " . $db->error);
-    $resulth = $stm->get_result() or die($db->error);
+    if (!$stm->execute()){
+        throw new Exception("Unable to execute statement: " . $db->error);
+    }
+    $resulth = $stm->get_result();
     return $resulth;
 }
 
@@ -202,7 +238,7 @@ function get_user($db, $username, $password){
             $u['active']    = $row_rs['active'];
                 
             // check if user has general cns and or LISE cleanroom training
-            $NF = execSql($db, "SELECT t.tool_name FROM cns_tools t inner join cns_trainlkp tr on t.master_id = tr.toolid WHERE tr.traineeid = ? AND (toolid=116 OR toolid=144)", 'i', array($uid));
+            $NF = exec_sql($db, "SELECT t.tool_name FROM cns_tools t inner join cns_trainlkp tr on t.master_id = tr.toolid WHERE tr.traineeid = ? AND (toolid=116 OR toolid=144)", 'i', array($uid));
             $u['training'] = [];
             while ($row_NF = $NF->fetch_row()){
                 array_push($u['training'], $row_NF[0]);
@@ -216,10 +252,11 @@ function get_user($db, $username, $password){
 
 
 function show_training_events($db){
-   // Leaving out the "davidsHack" piece for now.  Looks like it picks up workshops based on the dedicateLink column value
+    // Leaving out the "davidsHack" piece for now.  Looks like it picks up workshops based on the dedicateLink column value
     // as specified by the "eid" URL parameter
     $eid = 0;
     $davidsHack = "";
+
     // This gets the month and year from cns_workshops or URL params
     $mm = $db->query("SELECT distinct month(zdate) as mm, year(zdate) as yy FROM cns_workshops WHERE zdate >= '" . date("Y-m-d") . "' ORDER BY zdate ASC");
     $row_mm = $mm->fetch_assoc();
@@ -234,6 +271,23 @@ function show_training_events($db){
     } else {
         $selectedYear = $row_mm['yy'];
     }
+
+    //Get Month Year selection options
+    $options = [];
+    $optstring = "";
+    do { 
+        $curTime = mktime(0,0,0,$row_mm['mm'],1,$row_mm['yy']);
+        $selected = "";
+        if ($curTime == mktime(0,0,0,intval($selectedMonth),1,$selectedYear)){
+            $selected = "selected";
+        }
+        $opt = sprintf('<option %s value="%s">%s %s</option>', $selected, add_query_arg( array( 'mo' => date("m",$curTime), 'y' => $row_mm['yy'])),  date("F",$curTime), date("Y", $curTime));
+        array_push($options, $opt);
+    } while ($row_mm = mysqli_fetch_assoc($mm));
+    $optstring = implode($options);
+
+
+
     $view = "notall";
     if (isset($_GET['view']) && $_GET['view'] == "all"){
         $view = "all";
@@ -254,19 +308,6 @@ function show_training_events($db){
     $totalRows_labs = $labs->num_rows;
 
 
-    //Get Month Year selection options
-    $options = [];
-    $optstring = "";
-    do { 
-        $curTime = mktime(0,0,0,$row_mm['mm'],1,$row_mm['yy']);
-        $selected = "";
-        if ($curTime == mktime(0,0,0,intval($selectedMonth),1,$selectedYear)){
-            $selected = "selected";
-        }
-        $opt = sprintf('<option %s value="%s">%s %s</option>', $selected, add_query_arg( array( 'mo' => date("m",$curTime), 'y' => $row_mm['yy'])),  date("F",$curTime), date("Y", $curTime));
-        array_push($options, $opt);
-    } while ($row_mm = mysqli_fetch_assoc($mm));
-    $optstring = implode($options);
     
     // Go through each of the training sessions 
     $c=0;
@@ -303,10 +344,7 @@ function show_training_events($db){
             $ntrs = [];
             array_push($ntrs, sprintf('<tr><td colspan="5" class="training-date-header">%s</td></tr>', $dateinfo));
             do {
-                $query_cl = "SELECT count(Atn_ID) as dcount FROM cns_wksbooking WHERE ZID = " . $row_lab['Z_ID'];
-                $cl = $db->query($query_cl) or die($db->error);
-                $row_cl = $cl->fetch_assoc();
-                $totalRows_cl = $cl->num_rows;
+                $row_cl = fetch_row_assoc($db, "SELECT count(Atn_ID) as dcount FROM cns_wksbooking WHERE ZID = ?", 'i', $row_lab['Z_ID']);
                 $conto = $row_cl['dcount'];
                 $available = ($row_lab['zmax'] - $conto);
                 if ($available < 1){
@@ -766,6 +804,189 @@ function registration_form($db, $params){
     return $out; 
     } // Training OK
 
+}
+
+// Handle training cancel URL
+function training_cancel($db, $params){
+    
+    $out = "";
+    $trs = [];
+    $errorMsg = "";
+
+    $rid = $params['rid'];
+
+    if (array_key_exists('docancel', $params)){
+        // Go ahead and delete the booking record and associated billing / invoices
+
+        // Setup invoice / billing info
+        $opsid = $params['opsID'];
+        $invid = 0;
+        if ($opsid > 0){
+            $result = fetch_row_assoc($db, "SELECT invoiceid FROM cns_billing_ops WHERE Ops_ID = ?", 'i', array($opsid));
+            if (count($result) > 0){
+                $invid = $result['invoiceid'];
+            }
+        } else {
+            $invid = intval($params['invoiceID']);
+        }
+
+        // Delete booking
+        $result = exec_sql($db, "DELETE FROM cns_wksbooking WHERE Atn_ID = ?",'i', array($rid)); 
+
+        // Delete invoice
+        $result = exec_sql($db, "DELETE FROM cns_invoices WHERE Inv_ID = ?", 'i', array($invid));             
+        if ($opsid > 0){
+            $result = exec_sql($db, "DELETE FROM cns_billing_ops WHERE Ops_ID = ?", 'i', array($opsid));
+        } else {
+            $result = exec_sql($db, "DELETE FROM cns_billing_ops WHERE invoiceid = ?", 'i', array($invid));
+        }
+
+
+        
+        // Send email confirmation if possible.
+        if (!array_key_exists('userEmail', $params) || trim($params['userEmail']) == "" ){
+            $errorMsg = "Email address is missing for some reason.  Though your reservation was removed, you will not get a confirmation notice.";
+        } else {
+
+            $to         = trim($params['userEmail']);
+            $from       = trim($params['contactEmail']);
+            $name       = trim($params['userName']);
+            $event      = trim($params['evName']);
+            $eventdate  = trim($params['evDate']);
+
+            // Email notification 
+            send_cancellation_email($to, $from, $name, $event, $eventdate, $invid);
+        }
+        array_push($trs,
+            '<tr>
+                <td class="training-note">Your reservation has been canceled.</td>
+            </tr>'
+        );
+
+    } else {
+        // Setup the cancellation form
+        $email = $params['em'];
+        if (!is_numeric($rid)){
+            $errorMsg = "Invalid booking ID";
+        }
+        if (trim($email) == ""){
+            $errorMsg = "Email is empty";
+        }
+
+        if ($errorMsg == ""){
+            $rid = intval($rid);
+            $row_rs = fetch_row_assoc(
+                $db, 
+                "SELECT cns_wksbooking.*, cns_workshops.zname, cns_workshops.zdate, cns_workshops.start_time, cns_workshops.contactEmail 
+                FROM cns_wksbooking, cns_workshops 
+                WHERE cns_wksbooking.Atn_ID = ? AND cns_wksbooking.atEmail = ? AND cns_wksbooking.ZID=cns_workshops.Z_ID",
+                'is',
+                array($rid, $email)
+            );
+            if (count($row_rs) > 0){
+                if ($row_rs['start_time'] > date("Y-m-d H:i:s")){
+
+                    // Display the confirmation form
+                    $formrows = [];
+                    array_push(
+                        $formrows,
+                        '<tr>
+                            <td class="training-title">Cancel Your Training Reservation</td>
+                        </tr>'
+                    );
+                    array_push(
+                        $formrows, 
+                        '<input name="docancel" type="hidden" value="yes"/>'
+                    );
+                    array_push(
+                        $formrows, 
+                        sprintf('<input name="rid" type="hidden" value="%s"/>',$rid)
+                    );
+                    array_push(
+                        $formrows,
+                        sprintf('<input type="hidden" name="userEmail" value="%s"/>',$email)
+                    );
+                    array_push(
+                        $formrows,
+                        sprintf('<input type="hidden" name="userName" value="%s"/>', $row_rs['atName'])
+                    );
+                    array_push(
+                        $formrows,
+                        sprintf('<input type="hidden" name="opsID" value="%s"/>',$row_rs['opsID'])
+                    );
+                    array_push(
+                        $formrows,
+                        sprintf('<input type="hidden" name="invoiceID" value="%s"/>', $row_rs['invoiceID'])
+                    );
+                    array_push(
+                        $formrows,
+                        sprintf('<input type="hidden" name="contactEmail" value="%s"/>', $row_rs['contactEmail'])
+                    );
+                    array_push(
+                        $formrows,
+                        sprintf('<input type="hidden" name="evDate" value="%s"/>', date("M j, Y", strtotime($row_rs['zdate'])))
+                    );
+                    array_push(
+                        $formrows,
+                        sprintf('<input type="hidden" name="evName" value="%s"/>', $row_rs['zname'])
+                    );
+                    array_push(
+                        $formrows,
+                        sprintf(
+                            '<tr>
+                                <td class="training-note">Are you sure you want to cancel your reservation for the &quot;%s&quot; event on %s?</td>
+                            </tr>',
+                            $row_rs['zname'],
+                            date("M j, Y", strtotime($row_rs['zdate']))
+                        )
+                    );
+                    array_push(
+                        $formrows,
+                        '<tr>
+                            <td><input type="submit" value="Yes"></td>
+                        </tr>'
+                    );
+
+                    // Add the form to the output trs
+                    array_push(
+                        $trs,
+                        sprintf(
+                            '<tr>
+                                <td>
+                                    <table>
+                                        <form name="delReservation" method="post">
+                                            %s
+                                        </form>
+                                    </table>
+                                </td>
+                            </tr>',
+                            implode($formrows)
+                        )
+                    );
+                }
+                else {
+                    $errorMsg = "You can NOT cancel past reservations.";
+                }
+            }
+            else {
+                $errorMsg = "The reservation you are looking for does NOT exist.";
+            }
+        }
+
+    }
+    if ($errorMsg != ""){
+        // If there is an error, put it on the top
+        array_unshift($trs, 
+            sprintf(
+                '<tr>
+                    <td class="cns-error">%s</td>
+                </tr>'
+            , $errorMsg)
+        );
+    }
+
+    $out = sprintf('<table class="signup-table">%s</table>', implode($trs));
+    return $out;
 }
 
 // Allows me to test outside of wordpress environment

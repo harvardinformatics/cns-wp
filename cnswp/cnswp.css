@@ -65,10 +65,13 @@ tr.training-date-row:nth-child(odd) {
 }
 .signup-table {
     width: 70%;
-    border: none;
     border-collapse: separate;
     border-spacing: 20px;
     margin: 4em;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.22);
+    background-color: #fff;
+    min-height: 200px;
 }
 .small-note {
     font-weight: normal;
