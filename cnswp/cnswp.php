@@ -943,7 +943,7 @@ function training_cancel($db, $params){
                     array_push(
                         $formrows,
                         '<tr>
-                            <td><input class="cns-button" type="submit" value="Yes"></td>
+                            <td align="center"><input class="cns-button" type="submit" value="Yes"></td>
                         </tr>'
                     );
 
