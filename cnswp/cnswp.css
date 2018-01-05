@@ -87,6 +87,12 @@ tr.training-date-row:nth-child(odd) {
     width: 100%;
     text-align: right;
     font-style: italic;
+    clear: both;
+    position: relative;
+    z-index: 999;
+}
+.cns-button {
+    width: 50%;
 }
 
 

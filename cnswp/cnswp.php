@@ -43,7 +43,7 @@ function handle_url( $atts ){
             $out = show_training_events($db);
         }
     } catch (Exception $e){
-        $out = sprintf('<div class="error">%s</div>', $e->getMessage());
+        $out = sprintf('<table class="signup-table"><tr><td class="cns-error">%s</td></tr></table>', $e->getMessage());
     }
     $preamble = '<script type="text/javascript">var cnswp=true;</script>';
     return $preamble . $out;
@@ -771,7 +771,8 @@ function registration_form($db, $params){
                         <td width="70%"><input name="Phone" type="text" class="form3" id="Phone" size="15" /></td>
                     </tr>
                     <tr>
-                        <td colspan="2">* <em>required</em> </td>
+                        <td>&nbsp;</td>
+                        <td>* <em>required</em> </td>
                     </tr>
                     '
                 );
@@ -784,8 +785,7 @@ function registration_form($db, $params){
                 </tr> 
                 <tr>
                     <input type="hidden" name="MM_insert" value="reg" />
-                    <td align="center"><p class="login-btn login-item"><input type="submit" value="Sign up" /></p></td>
-                    <td>&nbsp;</td>
+                    <td colspan="2" align="center"><input class="cns-button" type="submit" value="Sign up" /></td>
                 </tr>
                 '
             );
@@ -943,7 +943,7 @@ function training_cancel($db, $params){
                     array_push(
                         $formrows,
                         '<tr>
-                            <td><input type="submit" value="Yes"></td>
+                            <td><input class="cns-button" type="submit" value="Yes"></td>
                         </tr>'
                     );
 
