@@ -180,6 +180,7 @@ function fetch_row_assoc($db, $sql, $typestr='', $vals=array()){
 function exec_sql($db, $sql, $typestr='', $vals=array()){
     $stm = $db->prepare($sql);
     if (!$stm){
+        error_log(sprintf("Error preparing SQL statement: %s\n%s\n%s", $sql, $typestr, implode('---', $vals)));
         throw new Exception("Failed to prepare the SQL statement: " . $db->error);
     } 
     if (!$typestr == ''){
@@ -191,6 +192,7 @@ function exec_sql($db, $sql, $typestr='', $vals=array()){
     }
    
     if (!$stm->execute()){
+        error_log(sprintf("Error executing SQL statement %s\n%s",$sql,implode("---", $vals)));
         throw new Exception("Unable to execute statement: " . $db->error);
     }
     $resulth = $stm->get_result();
@@ -248,7 +250,146 @@ function get_user($db, $username, $password){
     return $u;
 }
 
+// Create an invoice number of the form:
+// YYYYMMinvoice id
+function create_invoice_number($year, $month, $invID){
 
+    // Calculate fiscal year
+    if (intval($month) > 6){
+        $fy = date("y", mktime(0,0,0,0,0,($year + 2)));
+    } else {
+        $fy = date("y", mktime(0,0,0,0,0,($year + 1)));
+    }
+
+    // ? fiscal month ?
+    if (intval($month) < 10){
+        $fm = date("m", mktime(0,0,0,($month+1),0,0));
+    } else {
+        $fm = $month;
+    }
+
+    if (strpos($invID,"-") === false){
+        $invID = substr($invID,-4,4);
+    } else {
+        $ext = substr($invID,strpos($invID,"-"),strlen($invID));
+        $tempID = substr($invID,0,strpos($invID,"-"));
+        $tempID = substr($tempID,-4,4);
+        $invID = $tempID.$ext;
+    }
+    $newNO = $fy.$fm.$invID;
+    return $newNO;
+}
+
+// Charge for training
+// $db = database handle
+// $uid =  user id
+// $tid = "tool" to be billed
+// $rid = id of the training registration
+// $zid = the event to which the user is registered
+// $zdate = date of the event
+// $zstart = start time of the event
+// $zstop = end time of the event
+// $eventinfo = event info
+function make_training_invoice($db, $uid, $tid, $rid, $zid, $zdate, $zstart, $zstop, $eventinfo ){
+
+    //Get workshop data
+    $rowwshop = fetch_row_assoc($db, "SELECT * FROM cns_workshops WHERE Z_ID = ?", 'i', array($zid));
+
+    //Get user cap
+    $rowuser = fetch_row_assoc($db, "SELECT * FROM nnin_users WHERE ID = ?",'i',array($uid));
+    $usercap = $rowuser['Cap'];
+
+    //Determine user fee based on the Cap values
+    $row_fees = fetch_row_assoc($db, "SELECT HFee, NHFee, NAFee, IPPFee FROM cns_toolbillspecs WHERE toolMasterID = ?", 'i', array($tid));
+
+    $feeArray = array();
+    $feeArray[2000] = $row_fees['HFee'];
+    $feeArray[2600] = $row_fees['NHFee'];
+    $feeArray[11999] = $row_fees['IPPFee'];
+    $feeArray[12000] = $row_fees['NAFee'];
+
+    $userfee = number_format(($feeArray[$usercap] * $rowwshop['duration'] / $rowwshop['zmax']), 2);
+
+    // Harvard or non-Harvard billing
+    if ($cap != 2000 && $cap != 11999){
+        $billcode = $rowuser['PO_number'];
+    } else {
+        $billcode = $rowuser['Billing_Code'];
+    }
+
+    $invid = make_invoice($db, $tid, $uid, $rowuser['PIID'], $billcode, $zdate, 1, $userfee, 0, $userfee, 0, $zstart, $zstop, 0, $eventinfo, "", $rowwshop['duration'], "use", 3, date("Y-m-d H:i:s"));
+
+    exec_sql($db, "UPDATE cns_wksbooking SET invoiceid = ? WHERE atn_id = ?", 'ii', array($invid, $rid));
+        
+
+}
+
+// Insert an invoice record, record the transaction and return the new invoice id
+// $db = Database handle
+// $tid = Tool id
+// $uid = User id
+// $piid = PI id
+// $account = Harvard billing code or PO number
+// $datestring = Date of the thing that is being billed for
+// $hours
+// $normrate
+// $aurate
+// $total
+// $auhours
+// $zstart = check in time  used in cns_billing_ops
+// $zstop = check out time ued in cns_biling_ops
+// $runcap = ?
+// $notes = free text notes about invoiced thing
+// $intnotes ?
+// $realhours = actual duration
+// $billunit = ?
+// $lastaid ?
+// $lts ?
+function make_invoice($db, $tid, $uid, $piid, $account, $datestring, $hours, $normrate, $aurate, $total, $auhours, $zstart, $zstop, $runcap, $notes, $intnotes, $realhours, $billunit, $lastaid, $lts){
+
+    $year = date("Y",strtotime($datestring)); //iYear
+    $month = date("n",strtotime($datestring)); //iMonth
+    $dated = date("j",strtotime($datestring)); // "usage" day
+    $datelast = date("t",strtotime($datestring));
+    $lastofmonth = $year . "-" . date("m",strtotime($datestring)) . "-" . $datelast; // invoice real date
+    $quarter = ceil($month/3);
+
+    $vals = array($tid, $uid, $piid, $account, $datestring, $hours, $normrate, $aurate, $total, $auhours, $month, $year, $quarter, $runcap, $notes, $intnotes, $lastofmonth, $realhours, $billunit, $lastaid, $lts);
+    exec_sql($db, "INSERT INTO CNS_Invoices (iTID, iUID, iPIID, iAccount, iDates, iHours, iNormRate, iAuRate, iTotal, iAuHours, iMonth, iYear, iQuarter, runCap, iNotes, iIntNotes, realDate, realhours, billUnit, lastAID, lts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",'iiissdddddiiiisssdsis',$vals);
+            
+    $newinvid = $db->insert_id;
+
+    //----- calculate cumulative monthly invoice number -------------
+    $datestring = date("Ym");
+    $l = strlen($uid);
+    $d = 5-$l;
+    $zeros = "";
+    for ($i = 0; $i < $d; $i++){
+        $zeros .= "0";
+    }
+    $cumulative = $datestring.$zeros.$uid;
+
+    // ---- calculate invoice number ---------------------
+    $in = create_invoice_number($year, $month, $newinvid);
+
+    // ------------- update invoice to include the invoice number -----------------
+    exec_sql($db, "UPDATE CNS_Invoices SET inv_ref = ?, inv_no = ?, inv_cumno = ? WHERE inv_id = ?", 'issi', array($newinvid, $in, $cumulative, $newinvid));
+
+    // Record the transation in cns_billing_ops
+    $opsNoCap = record_transaction($db, 0, 0, $uid, 0, $tid, $newinvid, $month, $year, 0, $zstart, $zstop,"" ,0 , $zstart, $zstop, "", $notes, $billunit, $dated, $total, $billcode, 1, $total, $realhours, 0, 0);
+    return $newinvid;
+}
+
+// Insert into cns_billing_ops
+function record_transaction($db, $calendarid, $cleanid, $userid, $adminid, $toolid, $invoiceid, $month, $year, $clean_usetype, $clean_checkin, $clean_checkout, $clean_notes="", $clean_walkup, $calendar_start, $calendar_end, $calendar_notes="", $invNotes="", $billingUseType, $days, $rate, $account, $billableHours, $amount, $realHrs, $cap_eligible, $capped){ 
+
+    $vals = array( $calendarid, $cleanid, $userid, $adminid, $toolid, $invoiceid, $month, $year, $clean_usetype, $clean_checkin, $clean_checkout, $clean_notes, $clean_walkup, $calendar_start, $calendar_end, $calendar_notes, $invNotes, $billingUseType, $days, $rate, $account, $billableHours, $amount, $realHrs, $cap_eligible, $capped
+    );
+    exec_sql($db, "INSERT INTO cns_billing_ops (calendarid,cleanid,userid,adminid,toolid,invoiceid,oMonth,oYear,clean_usetype,clean_checkin,clean_checkout,clean_notes,clean_walkup,calendar_start,calendar_end,calendar_notes,invNotes,billingUseType,days,rate,account,billableHours,amount,realHrs,cap_eligible,capped) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 'iiiiiiiiissbissbbssdsdddii', $vals);
+
+    $newOpsID = $db->insert_id;
+    return $newOpsID;
+}
 
 
 function show_training_events($db){
@@ -501,7 +642,7 @@ function registration_form($db, $params){
             else {
 
                 //Retrieve documents for this zid
-                $row_rsDocs = fetch_row_assoc($db, "SELECT zdocs from cns_workshops where z_id = ?", 'i', array($zid));
+                $row_rsDocs = fetch_row_assoc($db, "SELECT zdocs FROM cns_workshops WHERE z_id = ?", 'i', array($zid));
                 if (!empty($row_rsDocs['zdocs'])){
                     $documents = unserialize($row_rsDocs['zdocs']);
                 } else {
@@ -537,12 +678,22 @@ function registration_form($db, $params){
                         $errorMsg = "Either your User Name or Password are incorrect.<br><em>Please try again.</em><br>";
                     }
                     elseif ($userinfo['active'] != 1){
-                        $errorMsg = "Your user account is no longer active.<br>Please call 617-496-9632 for support.";
+                        $errorMsg = 'Your user account is no longer active.<br>Please contact <a href="mailto:info@cns.fas.harvard.edu">info@cns.fas.harvard.edu</a> to reactivate.';
                     }
-                    elseif ($cnslimited == 2 && !array_key_exists('LISE Safety Training' , $userinfo['training'])){
-                        $errorMsg = "You are a valid CNS user but <u>NOT</u> a trained LISE cleanroom user.<br>
-                            You need formal Cleanroom training to attend this event.<br>
-                            Please call 617-496-9632 for further explanations.";
+                    elseif ($cnslimited == 1 && !in_array('LISE Safety Training' , $userinfo['training'])) {
+                        $errorMsg = 'You are a valid CNS user but need LISE Safety Training (NF05).<br>
+                            Please contact CNS staff (<a href="mailto:info@cns.fas.harvard.edu?subject=NF05%20Training%20needed">info@cns.fas.harvard.edu</a>) for further explanation.<br/><br/>';
+                    }
+                    elseif ($cnslimited == 2) {
+                        if (!in_array('LISE Safety Training' , $userinfo['training']) && !in_array('General Nanofabrication Facility Access' , $userinfo['training'])){
+                            $errorMsg = 'You are a valid CNS user but need LISE Safety Training (NF05) and General Nanofabrication Facility Access Training (NF01) to attend this event<br>
+                                Please contact CNS staff (<a href="mailto:info@cns.fas.harvard.edu?subject=NF05%20and%20NF01%20Training%20needed">info@cns.fas.harvard.edu</a>) for further explanation.<br/><br/>';
+                        }
+                        elseif (!in_array('General Nanofabrication Facility Access' , $userinfo['training'])){
+                            $errorMsg .= 'You are a valid CNS user but <u>NOT</u> a trained LISE cleanroom user.<br>
+                                You need formal General Nanofabrication Facility Access Training (NF01) to attend this event.<br>
+                                Please contact CNS staff (<a href="mailto:info@cns.fas.harvard.edu?subject=NF01%20Training%20needed">info@cns.fas.harvard.edu</a>) for further explanation.<br/><br/>';
+                        }
                     }
                     else {
                         // Already registered?
@@ -580,10 +731,15 @@ function registration_form($db, $params){
                         // $Result2 = mysql_query($updateStrings, $NNIN) or die(mysql_error());
                     $closeW="yes";
                         
-                    // --- invoicing module ---------------- 
-                    // if($params['billThis'] == 1 && $uid > 0){
-                    //     // require_once("training_invoicing.php");
-                    // }
+                    // bill if necessary
+                    if ($params['billThis'] == 1 && $uid > 0){
+                        $zdate  = $params['zdate'];
+                        $zstart = $params['zStart'];
+                        $zstop  = $params['zStop'];
+                        $tid    = $params['bill_tool'];
+                        $eventinfo = sprintf("CNS Training: %s - %s", $params['event'], $params['when']);
+                        make_training_invoice($db, $uid, $tid, $newrid, $zid, $zdate, $zstart, $zstop, $eventinfo);
+                    }
                     
                     // ---------- send eMail --------------------------------------------------
                     send_signup_message($userinfo['email'], $userinfo['name'], $row_lab['contactEmail'], $params['event'], $newrid, $params['when'], $documents);
