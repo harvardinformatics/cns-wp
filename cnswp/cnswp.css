@@ -95,4 +95,33 @@ tr.training-date-row:nth-child(odd) {
     width: 50%;
 }
 
-
+.cnslimited-checkbox {
+    position: relative !important;
+    opacity: 1 !important;
+    min-width: 20px !important;
+    min-height: 20px !important;
+    z-index: 100 !important;
+    vertical-align: middle !important;
+    bottom: 4px;
+    margin: 0.5em;
+    width: 16px !important;
+    height: 14px !important;
+}
+#training-type-menu {
+    list-style-type: none;
+}
+#training-type-menu li {
+    display: inline-block !important;
+    vertical-align: center !important;
+}
+#training-type-menu li div {
+    position: relative; 
+    float: left;
+    margin-left: 0.5em;
+    vertical-align: bottom;
+}
+#help-text {
+    font-size: 1em;
+    font-style: italic;
+    color: #b21d2e;
+}

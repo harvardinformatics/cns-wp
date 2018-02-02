@@ -398,6 +398,15 @@ function show_training_events($db){
     $eid = 0;
     $davidsHack = "";
 
+    if (array_key_exists('cnswp-selected', $_COOKIE)){
+        $selectedtypes = preg_split('/\s+/', trim($_COOKIE['cnswp-selected']));
+        if ($selectedtypes[0] == ""){
+            $selectedtypes = array('9');
+        }
+    } else {
+        $selectedtypes = array('0','1','2');
+    }
+
     // This gets the month and year from cns_workshops or URL params
     $mm = $db->query("SELECT distinct month(zdate) as mm, year(zdate) as yy FROM cns_workshops WHERE zdate >= '" . date("Y-m-d") . "' ORDER BY zdate ASC");
     $row_mm = $mm->fetch_assoc();
@@ -429,22 +438,39 @@ function show_training_events($db){
 
 
 
-    $view = "notall";
-    if (isset($_GET['view']) && $_GET['view'] == "all"){
-        $view = "all";
-    }
+    // $view = "notall";
+    // if (isset($_GET['view']) && $_GET['view'] == "all"){
+    //     $view = "all";
+    // }
 
-    if ($view == "all"){
-        $query_labs = "SELECT distinct zdate FROM cns_workshops WHERE zdate >= '" . date("Y-m-d") . "' OR zdate = '0000-00-00' ORDER BY zdate ASC, ztype ASC";
-    } else {
-        if( $eid > 0 ){ ///-------------> special David Bell Hack
-            $query_labs = "SELECT distinct zdate FROM cns_workshops WHERE " . $davidsHack . " ORDER BY zdate ASC, ztype ASC";
+    // if ($view == "all"){
+    //     $query_labs = "SELECT distinct zdate FROM cns_workshops WHERE zdate >= '" . date("Y-m-d") . "' OR zdate = '0000-00-00' ORDER BY zdate ASC, ztype ASC";
+    // } else {
+    //     if( $eid > 0 ){ ///-------------> special David Bell Hack
+    //         $query_labs = "SELECT distinct zdate FROM cns_workshops WHERE " . $davidsHack . " ORDER BY zdate ASC, ztype ASC";
 
-        } else {
-            $query_labs = "SELECT distinct zdate FROM cns_workshops WHERE zdate >= '" . date("Y-m-d") . "' AND month(zdate) = " . intval($selectedMonth) . " AND year(zdate) = " . intval($selectedYear) . " OR zdate = '0000-00-00' ORDER BY zdate ASC, ztype ASC";
-        }
-    }
-    $labs = $db->query($query_labs) or die($db->error);
+    //     } else {
+    //         $query_labs = "SELECT distinct zdate FROM cns_workshops WHERE zdate >= '" . date("Y-m-d") . "' AND month(zdate) = " . intval($selectedMonth) . " AND year(zdate) = " . intval($selectedYear) . " OR zdate = '0000-00-00' ORDER BY zdate ASC, ztype ASC";
+    //     }
+    // }
+    // Make an in clause for the CNSlimited values
+    $inclause = implode(",", array_fill(0, count($selectedtypes), "?"));
+    $typevalues = array_map('intval',$selectedtypes);
+
+    $labs = exec_sql(
+        $db, 
+        sprintf(
+            "SELECT 
+                distinct zdate 
+            FROM 
+                cns_workshops 
+            WHERE 
+                (zdate >= ? AND month(zdate) = ? AND year(zdate) = ? OR zdate = '0000-00-00') and cnslimited in (%s)  
+            ORDER BY 
+                zdate ASC, ztype ASC", $inclause),
+        "sii" . implode("", array_fill(0, count($selectedtypes), "i")),
+        array_merge(array(date("Y-m-d"), intval($selectedMonth), intval($selectedYear)), $typevalues)
+    );
     $row_labs = $labs->fetch_assoc();
     $totalRows_labs = $labs->num_rows;
 
@@ -464,18 +490,36 @@ function show_training_events($db){
                 $dateinfo = 'Date TBD - you can pre-register for this training session.<br><span class="staff-will-notify">CNS staff will notify you when a date has been set.</span>';
             }
 
-            if ($eid > 0){ ///-------------> special David Bell Hack
-                $query_lab = "SELECT cns_workshops.*, nnin_admin.First, nnin_admin.Last FROM cns_workshops, nnin_admin WHERE nnin_admin.AID =  cns_workshops.createdBy AND cns_workshops.zdate='" . $row_labs['zdate'] . "' AND (" . $davidsHack . ") ORDER BY zname ASC";
-            } else {
-                $query_lab = "SELECT cns_workshops.*, nnin_admin.First, nnin_admin.Last FROM cns_workshops, nnin_admin WHERE nnin_admin.AID =  cns_workshops.createdBy AND cns_workshops.zdate='" . $row_labs['zdate'] . "' ORDER BY zname ASC";
-            }
-            $lab = $db->query($query_lab) or die($db->error);
+            // if ($eid > 0){ ///-------------> special David Bell Hack
+            //     $query_lab = "SELECT cns_workshops.*, nnin_admin.First, nnin_admin.Last FROM cns_workshops, nnin_admin WHERE nnin_admin.AID =  cns_workshops.createdBy AND cns_workshops.zdate='" . $row_labs['zdate'] . "' AND (" . $davidsHack . ") ORDER BY zname ASC";
+            // } else {
+
+            // $query_lab = "SELECT cns_workshops.*, nnin_admin.First, nnin_admin.Last FROM cns_workshops, nnin_admin WHERE nnin_admin.AID =  cns_workshops.createdBy AND cns_workshops.zdate='" . $row_labs['zdate'] . "' ORDER BY zname ASC";
+            // $lab = $db->query($query_lab) or die($db->error);
+
+            // Execute the SQL for the workshops
+            $lab = exec_sql(
+                $db, 
+                sprintf(
+                    "SELECT 
+                        cns_workshops.*, nnin_admin.First, nnin_admin.Last 
+                    FROM 
+                        cns_workshops, nnin_admin 
+                    WHERE 
+                        nnin_admin.AID = cns_workshops.createdBy AND cns_workshops.zdate = ? and cns_workshops.CNSlimited in (%s) 
+                    ORDER BY 
+                    zname ASC", $inclause),
+                's' . implode('',array_fill(0, count($selectedtypes), "i")),
+                array_merge(array($row_labs['zdate']), $typevalues)
+            );
             $row_lab = $lab->fetch_assoc();
             $totalRows_lab = $lab->num_rows; // --------------------------
-
+            
+            $online = false;
             if ($row_labs['zdate'] == '0000-00-00'){
                 $pre = "Pre-";
                 $bgcolor = "#E1E1E1";
+                $online = true;
             } else {
                 $pre = "";
                 $bgcolor = "#FFFFFF";
@@ -510,42 +554,45 @@ function show_training_events($db){
                 );
                 array_push($ntrs, sprintf('<tr><td colspan="5" class="training-trainer">Trainer: %s %s</td></tr>',$row_lab['First'],$row_lab['Last']));
                 array_push($ntrs, sprintf('<tr><td colspan="5" class="training-desc">%s</td></tr>', $desc));
-                // Setup the header row
-                $userrestrictionheader = '<strong>Open Event!</strong>';
-                if ($row_lab['CNSlimited'] == 1){
-                    $userrestrictionheader = 'CNS Users <strong>ONLY</strong>';
-                } 
-                if ($row_lab['CNSlimited'] == 2) {
-                    $userrestrictionheader = 'LISE Cleanroom Users <strong>ONLY</strong>';
+                
+                if (!$online){
+                    // Setup the header row
+                    $userrestrictionheader = '<strong>Open Event!</strong>';
+                    if ($row_lab['CNSlimited'] == 1){
+                        $userrestrictionheader = 'CNS Users <strong>ONLY</strong>';
+                    } 
+                    if ($row_lab['CNSlimited'] == 2) {
+                        $userrestrictionheader = 'LISE Cleanroom Users <strong>ONLY</strong>';
+                    }
+                    $tds = [
+                        '<th colspan="2" align="center" width="*">Time</th>',
+                        '<th width="20%" align="center">Max Attendees</th>',
+                        '<th width="20%" align="center">Available</th>',
+                        sprintf('<th width="30%%" align="center">%s</th>', $userrestrictionheader)
+                    ];
+                    array_push($ntrs, sprintf('<tr>%s</tr>', implode($tds)));
+    
+                    // Data row with registration link
+                    $time = "";
+                    $ztime = empty($row_lab['ztime']) ? "" : $row_lab['ztime'];
+                    $availstyle = $available > 0 ? 'available' : 'notavailable';
+                    if ($row_lab['start_time'] > '0000-00-00 00:00:00'){
+                        $time = sprintf('%s - %s<br/>%s', date("g:i a",strtotime($row_lab['start_time'])), date("g:i a",strtotime($row_lab['end_time'])), $ztime);
+                    }
+                    $regtd = '<strong>Registration Closed</strong>';
+    
+                    if ($available > 0){
+                        $reglink = add_query_arg(array( 'ZID' => $row_lab['Z_ID'], 'toTID' => $toTID));
+                        $regtd = sprintf('<a href="%s">%sRegister!</a>', $reglink, $pre);
+                    }
+                    $tds = [
+                        sprintf('<td colspan="2" align="center" width="30%%">%s</td>',$time),
+                        sprintf('<td width="20%%" align="center">%s</td>', $row_lab['zmax']),
+                        sprintf('<td width="20%%" align="center" class="%s">%s</td>', $availstyle, $available),
+                        sprintf('<td width="30%%" align="center">%s</td>',$regtd)
+                    ];
+                    array_push($ntrs, sprintf('<tr>%s</tr>', implode($tds)));
                 }
-                $tds = [
-                    '<th colspan="2" align="center" width="*">Time</th>',
-                    '<th width="20%" align="center">Max Attendees</th>',
-                    '<th width="20%" align="center">Available</th>',
-                    sprintf('<th width="30%%" align="center">%s</th>', $userrestrictionheader)
-                ];
-                array_push($ntrs, sprintf('<tr>%s</tr>', implode($tds)));
-
-                // Data row with registration link
-                $time = "";
-                $ztime = empty($row_lab['ztime']) ? "" : $row_lab['ztime'];
-                $availstyle = $available > 0 ? 'available' : 'notavailable';
-                if ($row_lab['start_time'] > '0000-00-00 00:00:00'){
-                    $time = sprintf('%s - %s<br/>%s', date("g:i a",strtotime($row_lab['start_time'])), date("g:i a",strtotime($row_lab['end_time'])), $ztime);
-                }
-                $regtd = '<strong>Registration Closed</strong>';
-
-                if ($available > 0){
-                    $reglink = add_query_arg(array( 'ZID' => $row_lab['Z_ID'], 'toTID' => $toTID));
-                    $regtd = sprintf('<a href="%s">%sRegister!</a>', $reglink, $pre);
-                }
-                $tds = [
-                    sprintf('<td colspan="2" align="center" width="30%%">%s</td>',$time),
-                    sprintf('<td width="20%%" align="center">%s</td>', $row_lab['zmax']),
-                    sprintf('<td width="20%%" align="center" class="%s">%s</td>', $availstyle, $available),
-                    sprintf('<td width="30%%" align="center">%s</td>',$regtd)
-                ];
-                array_push($ntrs, sprintf('<tr>%s</tr>', implode($tds)));
                 array_push($ntrs, '<tr><td colspan="5">&nbsp;</td></tr>');
                 
             } while ($row_lab = $lab->fetch_assoc());
@@ -557,29 +604,33 @@ function show_training_events($db){
         array_push($trs, sprintf('<table width="100%%" border="0" cellpadding="1" cellspacing="1">%s</table>',implode($datetrs)));
     }
 
+    in_array('0', $selectedtypes) ? $openchecked = "checked" : $openchecked = "";
+    in_array('1', $selectedtypes) ? $cnsuserschecked = "checked" : $cnsuserschecked = "";
+    in_array('2', $selectedtypes) ? $liseuserschecked = "checked" : $liseuserschecked = "";
     $rowstr = implode($trs);
     
     $out = <<<EOT
 <table width="100%"  border="0" cellpadding="2" cellspacing="6" class="bodytxt">
     <tr>
-        <td align="center"><strong>CNS Training Events - Registration Page</strong></td>
+        <td align="center"><h1>CNS Training Events - Registration Page</h1></td>
     </tr>
     <tr>
-        <td valign="top">&nbsp;</td>
+        <td align="center">&nbsp;</td>
     </tr>
     <tr>
-        <td valign="top"><h2>Registration is currently open for the following training sessions:</h2></td>
+        <td>
+            <ul id="training-type-menu">
+                <li title="Free events open to any user."><div><input type="checkbox" class="cnslimited-checkbox" value="0" $openchecked ></div><div>Open Events</div>
+                </li>
+                <li title="Events for users that have had CNS training.  You may be charged for the session."><div><input type="checkbox" class="cnslimited-checkbox" value="1" $cnsuserschecked ></div><div>CNS Users Only</div>
+                </li>
+                <li title="Events for users that have had cleanroom access orientation. You may be charged for the session."><div><input type="checkbox" class="cnslimited-checkbox" value="2" $liseuserschecked ></div><div>LISE Cleanroom Users Only</div>
+                </li>
+                <li style="padding-bottom: 7px;"><div style="padding-left: 10px; border-left: 1px solid #39a9db; display: inline-block">Month</div><div style="display: inline-block"><form name="form" id="form"><select name="jumpMenu" class="form3" id="jumpMenu" onChange="MM_jumpMenu('parent',this,0)"> $optstring </select> </form></div>
+                </li>
+            </ul>
+        </td>
     </tr>
-    <form name="form" id="form">
-        <tr>
-            <td align="right">
-                <strong>Select month:</strong>             
-                <select name="jumpMenu" class="form3" id="jumpMenu" onChange="MM_jumpMenu('parent',this,0)">
-                    $optstring
-                </select>
-            </td>
-        </tr>
-    </form>
 $rowstr                                   
 </table>
 EOT;
@@ -1155,6 +1206,6 @@ if (function_exists('add_shortcode')){
     function add_scripts() {
         wp_register_style( 'cnswp', get_base_url() . '/cnswp.css' );
         wp_enqueue_style( 'cnswp' );
-        wp_enqueue_script( 'cnswp', get_base_url() . '/cnswp.js');
+        wp_enqueue_script( 'cnswp', get_base_url() . '/cnswp.js', array('jquery'));
     }
 }
